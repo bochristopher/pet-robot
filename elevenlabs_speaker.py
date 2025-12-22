@@ -36,36 +36,45 @@ CACHE_DIR.mkdir(exist_ok=True)
 AUDIO_DEVICE = "plughw:0,0"
 
 # ElevenLabs voice presets for robot pet personality
+# Using one consistent voice (Rachel) with different settings for emotions
+VOICE_ID = "21m00Tcm4TlvDq8ikWAM"  # Rachel - consistent voice across all emotions
+
 VOICE_PRESETS = {
     "friendly": {
-        "voice_id": "21m00Tcm4TlvDq8ikWAM",  # Rachel - friendly, warm
+        "voice_id": VOICE_ID,
         "stability": 0.5,
         "similarity_boost": 0.75,
         "style": 0.0,
     },
     "curious": {
-        "voice_id": "EXAVITQu4vr4xnSDxMaL",  # Bella - curious, expressive
+        "voice_id": VOICE_ID,
         "stability": 0.4,
         "similarity_boost": 0.8,
         "style": 0.3,
     },
     "excited": {
-        "voice_id": "ErXwobaYiN019PkySvjV",  # Antoni - energetic
+        "voice_id": VOICE_ID,
         "stability": 0.3,
-        "similarity_boost": 0.7,
+        "similarity_boost": 0.75,
         "style": 0.5,
     },
     "calm": {
-        "voice_id": "VR6AewLTigWG4xSOukaG",  # Arnold - calm, steady
+        "voice_id": VOICE_ID,
         "stability": 0.7,
         "similarity_boost": 0.6,
         "style": 0.0,
     },
     "playful": {
-        "voice_id": "MF3mGyEYCl7XYWbV9V6O",  # Elli - playful, young
+        "voice_id": VOICE_ID,
         "stability": 0.35,
         "similarity_boost": 0.75,
         "style": 0.4,
+    },
+    "apologetic": {
+        "voice_id": VOICE_ID,
+        "stability": 0.6,
+        "similarity_boost": 0.7,
+        "style": 0.1,
     },
 }
 
@@ -291,8 +300,14 @@ class ElevenLabsSpeaker:
             print(f"[Speaker] 💾 Cached: {cache_path.name}")
 
             # Play audio
-            return play_audio_file(cache_path, blocking=blocking)
-            
+            result = play_audio_file(cache_path, blocking=blocking)
+
+            # Small delay to prevent cutoff and let audio fully finish
+            if blocking:
+                time.sleep(0.3)
+
+            return result
+
         except Exception as e:
             print(f"[Speaker] ❌ ElevenLabs error: {e}")
             return speak_pyttsx3_fallback(text)
