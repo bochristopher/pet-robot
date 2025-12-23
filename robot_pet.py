@@ -207,7 +207,8 @@ class RobotPet:
         
         # Check for exploration
         if self._is_explore_command(command):
-            self.speaker.speak("Ooh, adventure time!", emotion="excited")
+            # Short response to avoid voice loop
+            self.speaker.speak("OK!", emotion="excited")
             self._start_exploration()
             return
         

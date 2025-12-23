@@ -248,7 +248,26 @@ class AutonomousExplorer:
         self.stats.vision_api_calls += 1
         print(f"[Explorer] 🌐 Calling Vision API (${VISION_API_COST})...")
 
-        description = self.vision.describe_scene()
+        # Capture frame from our camera (already open)
+        ret, frame = self.detector.cap.read()
+        if not ret:
+            print("[Explorer] ❌ Failed to capture frame")
+            return None
+
+        # Save temp image for Vision API
+        import tempfile
+        temp_path = tempfile.mktemp(suffix='.jpg')
+        cv2.imwrite(temp_path, frame)
+
+        # Get description using our captured frame
+        description = self.vision.describe_image(temp_path)
+
+        # Cleanup
+        import os
+        try:
+            os.remove(temp_path)
+        except:
+            pass
 
         if description:
             print(f"[Explorer] 📝 Vision: {description}")
@@ -262,22 +281,18 @@ class AutonomousExplorer:
         self.stats.stuck_recoveries += 1
         print(f"[Explorer] 🔄 Stuck detected! Using Vision API to understand...")
 
-        self._speak("Hmm, I seem to be stuck. Let me take a better look.",
-                   emotion="curious", blocking=True)
+        # Brief speech to avoid voice loop
+        self._speak("Hmm, stuck.", emotion="curious", blocking=True)
 
         # Get detailed view
         description = self._get_vision_description()
 
         if description:
-            # Use vision to decide action
+            # Use vision to decide action silently to avoid voice loop
             if "wall" in description.lower() or "blocked" in description.lower():
-                self._speak("I see a wall. Let me turn around completely.",
-                           emotion="thoughtful", blocking=False)
                 self.motors.rotate_180(blocking=True)
                 self.consecutive_turns = 0  # Reset stuck counter
             elif "open" in description.lower() or "clear" in description.lower():
-                self._speak("Actually, it looks clear. Let me try a different angle.",
-                           emotion="curious", blocking=False)
                 # Try opposite turn
                 if random.random() > 0.5:
                     self.motors.turn_left(TURN_DURATION, blocking=True)
@@ -285,15 +300,11 @@ class AutonomousExplorer:
                     self.motors.turn_right(TURN_DURATION, blocking=True)
                 self.consecutive_turns = 0
             else:
-                self._speak(f"I see {description}. Interesting! Let me find another way.",
-                           emotion="excited", blocking=False)
                 # Random recovery
                 self.motors.turn_right(TURN_DURATION * 1.5, blocking=True)
                 self.consecutive_turns = 0
         else:
-            # Fallback if Vision API fails
-            self._speak("I'm not sure, but let me try backing up.",
-                       emotion="uncertain", blocking=False)
+            # Fallback if Vision API fails - silent recovery
             self.motors.move_backward(1.0, blocking=True)
             self.motors.rotate_180(blocking=True)
             self.consecutive_turns = 0
@@ -303,16 +314,14 @@ class AutonomousExplorer:
         self.stats.curiosity_checks += 1
         print(f"[Explorer] 🤔 Curiosity check...")
 
-        self._speak("Ooh, what's around me?", emotion="curious", blocking=True)
+        # Brief speech
+        self._speak("What's here?", emotion="curious", blocking=True)
 
         description = self._get_vision_description()
 
         if description:
-            self._speak(f"I see {description}. How cool!",
-                       emotion="excited", blocking=True)
-        else:
-            self._speak("Hmm, I'm not sure, but it looks interesting!",
-                       emotion="playful", blocking=True)
+            # Keep it short
+            self._speak(f"I see {description[:50]}", emotion="excited", blocking=True)
 
         self.last_curiosity_time = time.time()
 
@@ -332,8 +341,7 @@ class AutonomousExplorer:
             self.stats.turns += 1
             self.consecutive_turns += 1
 
-            self._speak("Oops, something's there!", emotion="curious", blocking=False)
-
+            # Silent turn - no speech to avoid voice loop
             # Random turn direction
             if random.random() > 0.5:
                 self.motors.turn_left(TURN_DURATION, blocking=True)
@@ -353,8 +361,7 @@ class AutonomousExplorer:
             duration = random.uniform(FORWARD_DURATION_MIN, FORWARD_DURATION_MAX)
             self.motors.move_forward(duration, blocking=True)
 
-            # Random comment
-            self._random_comment()
+            # No random comments to avoid voice loop
 
         # Pause between movements
         time.sleep(PAUSE_BETWEEN_MOVES)
@@ -379,7 +386,8 @@ class AutonomousExplorer:
         if duration:
             print(f"[Explorer] ⏱️  Duration: {duration}s")
 
-        self._speak("Ooh, adventure time! Let's explore!", emotion="excited", blocking=True)
+        # Short startup speech to avoid triggering voice loop
+        self._speak("Exploring!", emotion="excited", blocking=True)
 
         try:
             while self.exploring and self.running:
@@ -416,8 +424,8 @@ class AutonomousExplorer:
 
         print(f"\n[Explorer] 🛑 Exploration stopped")
 
-        # Final speech
-        self._speak("That was fun! I'm back.", emotion="friendly", blocking=True)
+        # Brief end speech
+        self._speak("Done!", emotion="friendly", blocking=True)
 
         # Print stats
         self._print_stats()
