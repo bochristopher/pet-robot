@@ -30,7 +30,7 @@ from elevenlabs_speaker import ElevenLabsSpeaker, get_speaker
 from openai_vision import OpenAIVision, get_vision
 from motor_interface import MotorInterface, get_motors
 from robot_brain import RobotBrain, get_brain, BrainResponse
-from autonomous_mode import AutonomousExplorer
+from vision_only_explore import VisionOnlyExplorer
 
 
 # =============================================================================
@@ -92,7 +92,7 @@ class RobotPet:
         self.vision = get_vision()
         self.motors = get_motors()
         self.brain = get_brain()
-        self.explorer: Optional[AutonomousExplorer] = None  # Lazy init
+        self.explorer: Optional[VisionOnlyExplorer] = None  # Lazy init - Vision API only
 
         # Set up callbacks
         self.listener.set_wake_callback(self._on_wake)
@@ -258,8 +258,8 @@ class RobotPet:
 
         # Initialize explorer if needed
         if not self.explorer:
-            print("[Pet] 🔧 Initializing autonomous explorer...")
-            self.explorer = AutonomousExplorer()
+            print("[Pet] 🔧 Initializing vision-only explorer (GPT-4V)...")
+            self.explorer = VisionOnlyExplorer()
 
         self.exploring = True
         self.explore_thread = threading.Thread(target=self._explore_loop, daemon=True)
@@ -274,7 +274,7 @@ class RobotPet:
         print("[Pet] 🛑 Exploration stopped")
     
     def _explore_loop(self):
-        """Autonomous exploration loop using AutonomousExplorer."""
+        """Autonomous exploration loop using VisionOnlyExplorer (GPT-4V)."""
         try:
             # Run autonomous exploration indefinitely
             self.explorer.explore(duration=None)
