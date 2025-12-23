@@ -42,14 +42,15 @@ from elevenlabs_speaker import get_speaker
 # CONFIGURATION
 # =============================================================================
 
-# Movement parameters
-FORWARD_DURATION_SHORT = 1.0  # Quick forward burst
-FORWARD_DURATION_NORMAL = 2.0  # Normal forward movement
-FORWARD_DURATION_LONG = 3.0  # Long forward when very clear
-TURN_DURATION = 1.0  # Seconds to turn 45°
-TURN_DURATION_90 = 1.5  # Seconds for 90° turn
-BACKUP_DURATION = 1.5  # Seconds to back up
-ROTATE_180_DURATION = 3.2  # Full 180° turn
+# Movement parameters - CAUTIOUS for small 1ft x 1ft robot
+FORWARD_DURATION_CREEP = 0.3  # Tiny creep forward (when obstacle nearby)
+FORWARD_DURATION_SHORT = 0.5  # Short forward burst
+FORWARD_DURATION_NORMAL = 1.0  # Normal forward movement  
+FORWARD_DURATION_LONG = 2.0  # Long forward when VERY clear (wide open space)
+TURN_DURATION = 0.8  # Seconds to turn ~45°
+TURN_DURATION_90 = 1.2  # Seconds for 90° turn
+BACKUP_DURATION = 1.0  # Seconds to back up
+ROTATE_180_DURATION = 2.5  # Full 180° turn
 
 # Camera settings
 CAMERA_INDEX = 0
@@ -74,54 +75,64 @@ MAX_CONSECUTIVE_BACKUPS = 3
 # NAVIGATION PROMPT - The brain of the robot!
 # =============================================================================
 
-NAVIGATION_PROMPT = """You are the navigation AI for a small wheeled robot pet exploring a room.
+NAVIGATION_PROMPT = """You are the navigation AI for a SMALL wheeled robot pet (12 inches tall, 12 inches wide, 12 inches long - about 1 cubic foot).
 
-Analyze this camera view and provide a JSON response for safe navigation:
+The camera is mounted at the front of the robot, about 10 inches off the ground.
+
+CRITICAL: This robot is LOW to the ground. Look for obstacles at FLOOR LEVEL:
+- Furniture legs (chairs, tables, beds)
+- Cables, wires, cords
+- Shoes, bags, toys
+- Pet bowls, plants
+- Walls, doors, cabinets
+- Anything below 2 feet tall that could block path
+
+Analyze this camera view and provide a JSON response:
 
 {
-    "situation": "clear/obstacle_far/obstacle_near/wall_close/cornered/person/unknown",
-    "action": "forward_long/forward/forward_short/turn_left/turn_right/turn_left_90/turn_right_90/backup/rotate_180/stop/greet",
+    "situation": "wide_open/clear/obstacle_far/obstacle_near/obstacle_close/cornered/person",
+    "action": "forward_long/forward/forward_short/creep/turn_left/turn_right/turn_left_90/turn_right_90/backup/rotate_180/stop/greet",
     "confidence": 0.0-1.0,
-    "obstacles": ["list what you see blocking path"],
+    "distance_estimate": "far/medium/close/touching",
+    "obstacles": ["list obstacles you see"],
     "path_assessment": {
         "left_clear": true/false,
         "center_clear": true/false,
         "right_clear": true/false
     },
-    "reason": "brief explanation"
+    "reason": "what you see and why this action"
 }
 
-SITUATIONS:
-- "clear": Open floor ahead, safe to move forward
-- "obstacle_far": Object visible but 3+ feet away, can proceed carefully
-- "obstacle_near": Object within 2 feet, need to turn
-- "wall_close": Very close to wall/furniture (< 1 foot)
-- "cornered": Obstacles on multiple sides
-- "person": Human detected - social interaction
-- "unknown": Can't determine, be cautious
+SITUATIONS (be conservative!):
+- "wide_open": Large open space (like middle of room), floor visible 6+ feet ahead, NO obstacles
+- "clear": Floor visible 3-6 feet ahead, no immediate obstacles
+- "obstacle_far": Something visible 2-3 feet away
+- "obstacle_near": Something 1-2 feet away - need to slow down or turn
+- "obstacle_close": Something less than 1 foot away - STOP or backup!
+- "cornered": Obstacles on multiple sides - need 180° turn
+- "person": Human detected
 
 ACTIONS:
-- "forward_long": Path very clear, move forward 3 seconds
-- "forward": Path clear, move forward 2 seconds
-- "forward_short": Obstacle far, move forward 1 second cautiously
-- "turn_left": Turn left 45° (path clearer on left)
-- "turn_right": Turn right 45° (path clearer on right)
-- "turn_left_90": Turn left 90° (significant obstacle on right)
-- "turn_right_90": Turn right 90° (significant obstacle on left)
-- "backup": Very close to obstacle, back up first
-- "rotate_180": Turn completely around (cornered or dead end)
-- "stop": Unsafe to move
-- "greet": Person detected, stay still and be friendly
+- "forward_long": ONLY for wide_open - move 2 seconds (use rarely!)
+- "forward": Clear path ahead - move 1 second
+- "forward_short": Obstacle_far - move 0.5 seconds cautiously
+- "creep": Obstacle_near - inch forward 0.3 seconds, then check again
+- "turn_left" / "turn_right": Turn 45° toward clearer side
+- "turn_left_90" / "turn_right_90": Turn 90° to avoid obstacle
+- "backup": Too close! Back up first
+- "rotate_180": Dead end or cornered
+- "stop": Something blocking, assess before moving
+- "greet": Person detected, be friendly
 
-RULES:
-1. SAFETY FIRST - if unsure, recommend stop or backup
-2. Look at GROUND LEVEL for obstacles (furniture legs, toys, cables)
-3. Prefer turning toward the clearer side
-4. If cornered (obstacles left, center, AND right), recommend rotate_180
-5. If very close to something (fills most of frame), recommend backup first
-6. Be adventurous but cautious - we want to explore!
+CRITICAL RULES:
+1. DEFAULT TO CAUTION - if obstacle visible, recommend short/creep/turn, NOT forward_long
+2. "forward_long" ONLY when you see wide open floor with NOTHING in view
+3. If you see ANY furniture, walls, or objects - use forward_short or creep
+4. If object fills more than 30% of center frame - recommend turn or backup
+5. Look for thin obstacles like chair legs and cables
+6. When in doubt, turn to look around rather than move forward
 
-Respond with ONLY the JSON object, no other text."""
+Respond with ONLY the JSON object."""
 
 
 # =============================================================================
@@ -133,6 +144,7 @@ class ExplorationStats:
     """Track exploration session statistics."""
     start_time: float
     movements_forward: int = 0
+    movements_creep: int = 0
     turns_left: int = 0
     turns_right: int = 0
     backups: int = 0
@@ -141,6 +153,7 @@ class ExplorationStats:
     speech_chars: int = 0
     greetings: int = 0
     stuck_recoveries: int = 0
+    safety_overrides: int = 0
 
     def __post_init__(self):
         self.start_time = time.time()
@@ -150,7 +163,7 @@ class ExplorationStats:
     
     @property
     def total_actions(self) -> int:
-        return (self.movements_forward + self.turns_left + 
+        return (self.movements_forward + self.movements_creep + self.turns_left + 
                 self.turns_right + self.backups + self.rotations_180)
 
     def get_cost_estimate(self) -> float:
@@ -192,6 +205,8 @@ class VisionOnlyExplorer:
         self.stats = ExplorationStats(start_time=time.time())
         self.consecutive_turns = 0
         self.consecutive_backups = 0
+        self.consecutive_forwards = 0  # Track repeated forwards (safety check)
+        self.vision_failures = 0  # Track consecutive vision failures
         self.last_action = None
         
         # Voice event flag
@@ -333,17 +348,46 @@ class VisionOnlyExplorer:
         action = decision.get("action", "stop")
         confidence = decision.get("confidence", 0.0)
         situation = decision.get("situation", "unknown")
+        distance = decision.get("distance_estimate", "unknown")
+        
+        # SAFETY OVERRIDE: If distance is "close" or "touching", don't move forward!
+        if distance in ["close", "touching"] and action in ["forward_long", "forward", "forward_short"]:
+            print(f"[Vision] 🛡️  SAFETY OVERRIDE: Distance is {distance}, changing forward to turn")
+            self.stats.safety_overrides += 1
+            action = "turn_right" if decision.get("path_assessment", {}).get("right_clear", True) else "turn_left"
+        
+        # SAFETY OVERRIDE: If situation is obstacle_close but action is forward, override
+        if situation == "obstacle_close" and action in ["forward_long", "forward", "forward_short", "creep"]:
+            print(f"[Vision] 🛡️  SAFETY OVERRIDE: Obstacle close, backing up instead")
+            self.stats.safety_overrides += 1
+            action = "backup"
         
         # Track consecutive actions for stuck detection
         if action in ["turn_left", "turn_right", "turn_left_90", "turn_right_90"]:
             self.consecutive_turns += 1
             self.consecutive_backups = 0
+            self.consecutive_forwards = 0
         elif action == "backup":
             self.consecutive_backups += 1
             self.consecutive_turns = 0
+            self.consecutive_forwards = 0
+        elif action in ["forward_long", "forward", "forward_short", "creep"]:
+            self.consecutive_forwards += 1
+            self.consecutive_turns = 0
+            self.consecutive_backups = 0
         else:
             self.consecutive_turns = 0
             self.consecutive_backups = 0
+            self.consecutive_forwards = 0
+        
+        # SAFETY: If too many consecutive forwards, force a turn to look around
+        # This prevents running into things if GPT-4V keeps saying "clear"
+        if self.consecutive_forwards >= 4:
+            print("[Vision] ⚠️  Too many forwards! Forcing safety turn to look around")
+            self.motors.turn_right(TURN_DURATION, blocking=True)
+            self.stats.turns_right += 1
+            self.consecutive_forwards = 0
+            return
         
         # Check if stuck
         if self.consecutive_turns >= MAX_CONSECUTIVE_TURNS:
@@ -362,6 +406,7 @@ class VisionOnlyExplorer:
         print(f"[Vision] ⚡ Executing: {action}")
         
         if action == "forward_long":
+            # Only for wide open spaces
             self.motors.move_forward(FORWARD_DURATION_LONG, blocking=True)
             self.stats.movements_forward += 1
             
@@ -372,6 +417,11 @@ class VisionOnlyExplorer:
         elif action == "forward_short":
             self.motors.move_forward(FORWARD_DURATION_SHORT, blocking=True)
             self.stats.movements_forward += 1
+            
+        elif action == "creep":
+            # Tiny movement when obstacle nearby
+            self.motors.move_forward(FORWARD_DURATION_CREEP, blocking=True)
+            self.stats.movements_creep += 1
             
         elif action == "turn_left":
             self.motors.turn_left(TURN_DURATION, blocking=True)
@@ -488,19 +538,26 @@ Focus on the main objects and their positions. Be concise - this will be spoken 
                 decision = self._get_navigation_decision()
                 
                 if decision:
+                    self.vision_failures = 0  # Reset failure counter
                     confidence = decision.get("confidence", 0.0)
                     
                     if confidence >= LOW_CONFIDENCE:
                         self._execute_action(decision)
                     else:
-                        print(f"[Vision] ⚠️  Very low confidence ({confidence:.2f}), stopping")
-                        self.motors.stop()
-                        time.sleep(1.0)
+                        print(f"[Vision] ⚠️  Very low confidence ({confidence:.2f}), turning to look")
+                        self.motors.turn_right(TURN_DURATION, blocking=True)
+                        self.stats.turns_right += 1
                 else:
-                    # Vision failed - stop and wait
-                    print("[Vision] ⚠️  Vision failed, pausing...")
-                    self.motors.stop()
-                    time.sleep(2.0)
+                    # Vision failed - turn to get new view instead of just stopping
+                    self.vision_failures += 1
+                    print(f"[Vision] ⚠️  Vision failed ({self.vision_failures}x), turning to look around...")
+                    self.motors.turn_right(TURN_DURATION, blocking=True)
+                    self.stats.turns_right += 1
+                    
+                    # If vision keeps failing, stop exploration
+                    if self.vision_failures >= 5:
+                        print("[Vision] ❌ Too many vision failures, stopping exploration")
+                        break
                 
                 # Brief pause between cycles
                 time.sleep(0.5)
@@ -537,10 +594,12 @@ Focus on the main objects and their positions. Be concise - this will be spoken 
         print("="*60)
         print(f"⏱️  Duration: {duration:.1f}s ({duration/60:.1f} min)")
         print(f"🚶 Forward movements: {self.stats.movements_forward}")
+        print(f"🐢 Creep movements: {self.stats.movements_creep}")
         print(f"⬅️  Left turns: {self.stats.turns_left}")
         print(f"➡️  Right turns: {self.stats.turns_right}")
         print(f"⬇️  Backups: {self.stats.backups}")
         print(f"🔄 180° rotations: {self.stats.rotations_180}")
+        print(f"🛡️  Safety overrides: {self.stats.safety_overrides}")
         print(f"👋 Greetings: {self.stats.greetings}")
         print(f"🆘 Stuck recoveries: {self.stats.stuck_recoveries}")
         print(f"🌐 Vision API calls: {self.stats.vision_api_calls} "
