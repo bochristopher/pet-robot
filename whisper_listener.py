@@ -44,18 +44,22 @@ except ImportError:
 SAMPLE_RATE = 16000
 CHANNELS = 1  # Mono
 DTYPE = 'int16'
-BLOCK_SIZE = 8000  # ~500ms chunks
+BLOCK_SIZE = 16000  # ~1000ms chunks (increased from 8000 to reduce overflow)
 
 # Voice detection
-SILENCE_THRESHOLD = 500  # RMS threshold for silence
-SPEECH_THRESHOLD = 800   # RMS threshold for speech
-MIN_SPEECH_DURATION = 0.5  # Minimum seconds of speech
+SILENCE_THRESHOLD = 400  # RMS threshold for silence (lowered from 500)
+SPEECH_THRESHOLD = 600   # RMS threshold for speech (lowered from 800)
+MIN_SPEECH_DURATION = 0.3  # Minimum seconds of speech (lowered from 0.5)
 MAX_COMMAND_DURATION = 8.0  # Maximum seconds to listen for command
-SILENCE_AFTER_SPEECH = 1.5  # Silence duration to end command
+SILENCE_AFTER_SPEECH = 1.2  # Silence duration to end command (lowered from 1.5)
 CONVERSATION_TIMEOUT = 60.0  # Stay awake for 1 minute after wake word
 
-# Wake words (lowercase)
-WAKE_WORDS = ["hey robot", "robot", "hey bot", "okay robot"]
+# Wake words (lowercase) - includes common misrecognitions
+WAKE_WORDS = [
+    "hey robot", "robot", "hey bot", "okay robot", "ok robot",
+    "a robot", "hey robotic", "hey robert", "air robot",
+    "hey trouble", "hey robux"  # Common Whisper mishears
+]
 
 # USB Microphone
 MIC_DEVICE = None  # None = auto-detect
@@ -285,6 +289,9 @@ class WhisperListener:
                 # Wake word only - start listening
                 self._trigger_wake_word()
                 return
+
+        # No wake word detected - give user feedback
+        print(f"[Voice] 💤 No wake word detected. Say 'hey robot' to activate.")
 
     def _trigger_wake_word(self):
         """Handle wake word detection."""

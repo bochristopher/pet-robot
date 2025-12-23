@@ -38,7 +38,7 @@ from autonomous_mode import AutonomousExplorer
 # =============================================================================
 
 # Startup greeting
-STARTUP_GREETING = "Hello! I'm Spark, your robot pet. Say 'hey robot' to talk to me!"
+STARTUP_GREETING = "Ready! Say: hey robot."
 
 # Command patterns for quick actions (bypass AI for speed)
 QUICK_COMMANDS = {
