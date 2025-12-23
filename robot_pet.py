@@ -25,7 +25,7 @@ from typing import Optional
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # Import robot modules
-from voice_listener import VoiceListener, get_listener
+from whisper_listener import WhisperListener as VoiceListener, get_listener
 from elevenlabs_speaker import ElevenLabsSpeaker, get_speaker
 from openai_vision import OpenAIVision, get_vision
 from motor_interface import MotorInterface, get_motors

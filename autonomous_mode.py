@@ -40,7 +40,7 @@ TURN_DURATION = 1.0  # Seconds to turn when obstacle detected
 PAUSE_BETWEEN_MOVES = 0.5  # Brief pause between movements
 
 # Vision parameters
-OBSTACLE_EDGE_THRESHOLD = 8000  # Edge pixels to consider obstacle
+OBSTACLE_EDGE_THRESHOLD = 25000  # Edge pixels to consider obstacle (raised from 8000)
 CENTER_WEIGHT = 2.0  # Weight for center region obstacles
 VISION_CHECK_INTERVAL = 2.0  # Seconds between obstacle checks
 
