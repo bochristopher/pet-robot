@@ -231,10 +231,14 @@ class AutonomousExplorer:
 
         path_clear = result["path_clear"]
 
-        if not path_clear:
-            print(f"[Explorer] 🚧 Obstacle detected! "
-                  f"(edges: {result['weighted_edges']}, "
-                  f"time: {result['processing_time_ms']}ms)")
+        # Always show what we're seeing
+        status = "✅ CLEAR" if path_clear else "🚧 BLOCKED"
+        print(f"[Explorer] 👁️  {status} | "
+              f"Total edges: {result['edge_count']:>5} | "
+              f"Center edges: {result['center_edges']:>5} | "
+              f"Weighted: {result['weighted_edges']:>5} | "
+              f"Threshold: {OBSTACLE_EDGE_THRESHOLD} | "
+              f"{result['processing_time_ms']:.1f}ms")
 
         return path_clear
 
