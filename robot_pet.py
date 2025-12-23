@@ -79,7 +79,7 @@ class RobotPet:
         print("\n" + "="*60)
         print("🤖 ROBOT PET - SPARK")
         print("="*60)
-        
+
         self.running = False
         self.exploring = False
         self.explore_thread: Optional[threading.Thread] = None
@@ -93,18 +93,34 @@ class RobotPet:
         self.motors = get_motors()
         self.brain = get_brain()
         self.explorer: Optional[AutonomousExplorer] = None  # Lazy init
-        
+
         # Set up callbacks
         self.listener.set_wake_callback(self._on_wake)
         self.listener.set_command_callback(self._on_command)
-        
+
         print("\n✅ All modules loaded!")
         print("="*60)
+
+    def _speak(self, text: str, emotion: str = "friendly", blocking: bool = True):
+        """Speak with automatic listener pause/resume to prevent self-hearing."""
+        # Pause listener to avoid hearing ourselves
+        self.listener.pause()
+
+        # Speak
+        self.speaker.speak(text, emotion=emotion, blocking=blocking)
+
+        # Wait a bit for audio to finish if non-blocking
+        if not blocking:
+            time.sleep(1.0)
+
+        # Resume listener
+        time.sleep(0.5)  # Extra buffer
+        self.listener.resume()
     
     def _on_wake(self):
         """Called when wake word is detected."""
         # Play a quick acknowledgment sound
-        self.speaker.speak("Yes?", emotion="curious", blocking=False)
+        self._speak("Yes?", emotion="curious", blocking=False)
     
     def _on_command(self, command: str):
         """Called when a command is transcribed."""
@@ -180,7 +196,7 @@ class RobotPet:
         if command.lower() in ["stop", "halt"]:
             self._stop_exploration()
             self.motors.stop()
-            self.speaker.speak("Stopping!", emotion="calm")
+            self._speak("Stopping!", emotion="calm")
             return
 
         # Handle vision commands during exploration
@@ -196,40 +212,40 @@ class RobotPet:
             
             # Quick verbal response
             if action_type == "move":
-                self.speaker.speak("On it!", emotion="playful", blocking=False)
+                self._speak("On it!", emotion="playful", blocking=False)
             elif action_type == "rotate":
-                self.speaker.speak("Wheee!", emotion="excited", blocking=False)
+                self._speak("Wheee!", emotion="excited", blocking=False)
             elif action_type == "stop":
-                self.speaker.speak("Stopping!", emotion="calm")
-            
+                self._speak("Stopping!", emotion="calm")
+
             self._execute_action(quick)
             return
-        
+
         # Check for exploration
         if self._is_explore_command(command):
             # Short response to avoid voice loop
-            self.speaker.speak("OK!", emotion="excited")
+            self._speak("OK!", emotion="excited")
             self._start_exploration()
             return
-        
+
         # Check for vision commands
         if self._needs_vision(command):
-            self.speaker.speak("Let me look...", emotion="curious", blocking=True)
-            
+            self._speak("Let me look...", emotion="curious", blocking=True)
+
             description = self.vision.describe_scene()
             if description:
                 self.brain.set_vision_context(description)
                 response = self.brain.think(f"I see: {description}. Describe this excitedly.")
-                self.speaker.speak(response.text, emotion="excited")
+                self._speak(response.text, emotion="excited")
             else:
-                self.speaker.speak("Hmm, I'm having trouble seeing right now.", emotion="apologetic")
+                self._speak("Hmm, I'm having trouble seeing right now.", emotion="apologetic")
             return
-        
+
         # Use AI brain for complex commands
         response = self.brain.think(command)
-        
+
         # Speak the response
-        self.speaker.speak(response.text, emotion=response.emotion, blocking=False)
+        self._speak(response.text, emotion=response.emotion, blocking=False)
         
         # Execute any actions
         for action in response.actions:
@@ -269,31 +285,31 @@ class RobotPet:
     def _follow_person(self):
         """Follow a detected person."""
         person = self.vision.find_person()
-        
+
         if not person or not person.get("person_detected"):
-            self.speaker.speak("I don't see anyone to follow.", emotion="apologetic")
+            self._speak("I don't see anyone to follow.", emotion="apologetic")
             return
-        
+
         position = person.get("positions", ["center"])[0]
-        
+
         if position == "left":
             self.motors.turn_left(0.3)
         elif position == "right":
             self.motors.turn_right(0.3)
-        
+
         self.motors.move_forward(1.0)
-        self.speaker.speak("Following you!", emotion="playful")
+        self._speak("Following you!", emotion="playful")
     
     def start(self):
         """Start the robot pet."""
         self.running = True
-        
-        # Start voice listener
+
+        # Start voice listener first
         self.listener.start()
-        
-        # Startup greeting
-        self.speaker.speak(STARTUP_GREETING, emotion="friendly")
-        
+
+        # Now speak startup greeting (will pause/resume listener)
+        self._speak(STARTUP_GREETING, emotion="friendly")
+
         print("\n🎤 Listening for 'hey robot'...")
         print("   Say commands like:")
         print("   - 'what do you see'")
@@ -309,14 +325,16 @@ class RobotPet:
         self.running = False
         self._stop_exploration()
         self.motors.stop()
+
+        # Say goodbye before stopping listener
+        self._speak("Goodbye! See you later!", emotion="friendly")
+
         self.listener.stop()
         self.vision.release()
 
         # Cleanup explorer
         if self.explorer:
             self.explorer.cleanup()
-
-        self.speaker.speak("Goodbye! See you later!", emotion="friendly")
 
         # Print stats
         print("\n📊 Session Statistics:")

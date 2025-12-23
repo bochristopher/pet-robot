@@ -125,6 +125,7 @@ class WhisperListener:
 
         self.running = False
         self.listening_for_command = False
+        self.paused = False  # Pause during speech output
         self.command_queue: queue.Queue = queue.Queue()
 
         self.mic_device = MIC_DEVICE or find_usb_microphone()
@@ -200,6 +201,10 @@ class WhisperListener:
     def _process_audio(self, indata: np.ndarray, frames: int,
                        time_info: dict, status: sd.CallbackFlags):
         """Audio callback - processes incoming audio chunks."""
+        # Ignore audio if paused (robot is speaking)
+        if self.paused:
+            return
+
         if status:
             print(f"[Voice] ⚠️  Audio status: {status}")
 
@@ -397,6 +402,18 @@ class WhisperListener:
     def trigger_listen(self):
         """Manually trigger command listening (skip wake word)."""
         self._trigger_wake_word()
+
+    def pause(self):
+        """Pause listening (e.g., during robot speech)."""
+        self.paused = True
+        # Clear buffers to avoid hearing tail end of speech
+        self._audio_buffer = []
+        self._speech_start_time = None
+        self._last_speech_time = None
+
+    def resume(self):
+        """Resume listening after pause."""
+        self.paused = False
 
     def get_stats(self) -> dict:
         """Get listener statistics."""
