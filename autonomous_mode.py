@@ -279,33 +279,44 @@ class AutonomousExplorer:
     def _handle_stuck(self):
         """Handle stuck scenario using Vision API."""
         self.stats.stuck_recoveries += 1
-        print(f"[Explorer] 🔄 Stuck detected! Using Vision API to understand...")
+        print(f"[Explorer] 🔄 Stuck detected! Backing up to get better view...")
 
         # Brief speech to avoid voice loop
         self._speak("Hmm, stuck.", emotion="curious", blocking=True)
 
-        # Get detailed view
+        # IMPORTANT: Back up first so camera can see surroundings
+        # If we're against a wall, camera just sees blank surface - useless!
+        self.motors.move_backward(1.5, blocking=True)
+
+        # Wait for movement to complete and camera to stabilize
+        time.sleep(0.5)
+
+        # Now get detailed view from a distance
+        print(f"[Explorer] 📸 Taking picture from distance...")
         description = self._get_vision_description()
 
         if description:
             # Use vision to decide action silently to avoid voice loop
-            if "wall" in description.lower() or "blocked" in description.lower():
+            print(f"[Explorer] 🤔 Vision says: {description}")
+
+            if "wall" in description.lower() or "blocked" in description.lower() or "obstacle" in description.lower():
+                # Major obstacle - turn around completely
                 self.motors.rotate_180(blocking=True)
-                self.consecutive_turns = 0  # Reset stuck counter
-            elif "open" in description.lower() or "clear" in description.lower():
-                # Try opposite turn
+                self.consecutive_turns = 0
+            elif "open" in description.lower() or "clear" in description.lower() or "space" in description.lower():
+                # Seems open - try turning to find path
                 if random.random() > 0.5:
-                    self.motors.turn_left(TURN_DURATION, blocking=True)
+                    self.motors.turn_left(TURN_DURATION * 1.5, blocking=True)
                 else:
-                    self.motors.turn_right(TURN_DURATION, blocking=True)
+                    self.motors.turn_right(TURN_DURATION * 1.5, blocking=True)
                 self.consecutive_turns = 0
             else:
-                # Random recovery
-                self.motors.turn_right(TURN_DURATION * 1.5, blocking=True)
+                # Unclear - rotate 180 to try completely different direction
+                self.motors.rotate_180(blocking=True)
                 self.consecutive_turns = 0
         else:
-            # Fallback if Vision API fails - silent recovery
-            self.motors.move_backward(1.0, blocking=True)
+            # Fallback if Vision API fails - just rotate and try again
+            print("[Explorer] ⚠️  Vision failed, rotating to new direction")
             self.motors.rotate_180(blocking=True)
             self.consecutive_turns = 0
 
