@@ -30,6 +30,7 @@ from elevenlabs_speaker import ElevenLabsSpeaker, get_speaker
 from openai_vision import OpenAIVision, get_vision
 from motor_interface import MotorInterface, get_motors
 from robot_brain import RobotBrain, get_brain, BrainResponse
+from autonomous_mode import AutonomousExplorer
 
 
 # =============================================================================
@@ -82,15 +83,16 @@ class RobotPet:
         self.running = False
         self.exploring = False
         self.explore_thread: Optional[threading.Thread] = None
-        
+
         # Initialize modules
         print("\n📦 Loading modules...")
-        
+
         self.listener = get_listener()
         self.speaker = get_speaker()
         self.vision = get_vision()
         self.motors = get_motors()
         self.brain = get_brain()
+        self.explorer: Optional[AutonomousExplorer] = None  # Lazy init
         
         # Set up callbacks
         self.listener.set_wake_callback(self._on_wake)
@@ -173,12 +175,18 @@ class RobotPet:
     def _process_command(self, command: str):
         """Process a voice command."""
         print(f"\n[Pet] 📝 Processing: '{command}'")
-        
+
         # Stop exploration if running
         if command.lower() in ["stop", "halt"]:
             self._stop_exploration()
             self.motors.stop()
             self.speaker.speak("Stopping!", emotion="calm")
+            return
+
+        # Handle vision commands during exploration
+        if self.exploring and self._needs_vision(command):
+            if self.explorer:
+                self.explorer.set_voice_describe()
             return
         
         # Check for quick commands
@@ -230,7 +238,12 @@ class RobotPet:
         """Start autonomous exploration mode."""
         if self.exploring:
             return
-        
+
+        # Initialize explorer if needed
+        if not self.explorer:
+            print("[Pet] 🔧 Initializing autonomous explorer...")
+            self.explorer = AutonomousExplorer()
+
         self.exploring = True
         self.explore_thread = threading.Thread(target=self._explore_loop, daemon=True)
         self.explore_thread.start()
@@ -239,37 +252,18 @@ class RobotPet:
     def _stop_exploration(self):
         """Stop autonomous exploration."""
         self.exploring = False
+        if self.explorer:
+            self.explorer.stop()
         print("[Pet] 🛑 Exploration stopped")
     
     def _explore_loop(self):
-        """Autonomous exploration loop."""
-        import random
-        
-        while self.exploring and self.running:
-            # Check for obstacles
-            obstacles = self.vision.detect_obstacles()
-            
-            if obstacles and obstacles.get("path_clear") == False:
-                # Obstacle detected - turn
-                self.speaker.speak("Oops, something's there!", emotion="curious", blocking=False)
-                
-                if random.random() > 0.5:
-                    self.motors.turn_left(blocking=True)
-                else:
-                    self.motors.turn_right(blocking=True)
-            else:
-                # Path clear - move forward
-                duration = random.uniform(1.5, 3.0)
-                self.motors.move_forward(duration, blocking=True)
-            
-            # Occasionally comment on surroundings
-            if random.random() < 0.3:
-                comment = self.vision.get_exploration_comment()
-                if comment:
-                    self.speaker.speak(comment, emotion="curious", blocking=True)
-            
-            # Brief pause between movements
-            time.sleep(0.5)
+        """Autonomous exploration loop using AutonomousExplorer."""
+        try:
+            # Run autonomous exploration indefinitely
+            self.explorer.explore(duration=None)
+        except Exception as e:
+            print(f"[Pet] ❌ Exploration error: {e}")
+            self.exploring = False
     
     def _follow_person(self):
         """Follow a detected person."""
@@ -310,15 +304,19 @@ class RobotPet:
     def stop(self):
         """Stop the robot pet."""
         print("\n[Pet] 🛑 Shutting down...")
-        
+
         self.running = False
         self._stop_exploration()
         self.motors.stop()
         self.listener.stop()
         self.vision.release()
-        
+
+        # Cleanup explorer
+        if self.explorer:
+            self.explorer.cleanup()
+
         self.speaker.speak("Goodbye! See you later!", emotion="friendly")
-        
+
         # Print stats
         print("\n📊 Session Statistics:")
         print(f"   Voice: {self.listener.get_stats()}")
@@ -398,4 +396,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
