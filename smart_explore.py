@@ -59,21 +59,96 @@ FRONTIER_MIN_SIZE = 3    # Minimum frontier size to consider
 # Grid center is robot start position
 GRID_CENTER = GRID_SIZE // 2
 
-# ============ VOICE ============
+# ============ VOICE WITH PERSONALITY ============
+import random
+
 last_speak_time = 0
-def speak(text, min_interval=2.0):
-    global last_speak_time
+last_phrase_key = None
+
+# Personality phrases for different situations
+PHRASES = {
+    'startup': [
+        "Ooh, adventure time!",
+        "Let's see what's out there!",
+        "Time to explore!",
+        "Here we go!",
+    ],
+    'obstacle': [
+        "Whoa, something's there!",
+        "Oops, gotta go around!",
+        "Hmm, can't go that way.",
+        "Nope, blocked!",
+        "Let me find another way.",
+    ],
+    'stuck': [
+        "Ugh, I'm stuck!",
+        "Help, I can't move!",
+        "Okay, this isn't working.",
+        "Let me try something else.",
+        "Wiggle wiggle!",
+    ],
+    'unstuck': [
+        "There we go!",
+        "Freedom!",
+        "That's better!",
+    ],
+    'new_goal': [
+        "Ooh, what's over there?",
+        "Let's check this out!",
+        "I see something interesting!",
+        "This way looks fun!",
+    ],
+    'reached': [
+        "Made it!",
+        "Cool, new area!",
+        "Nice!",
+        "Exploring more!",
+    ],
+    'all_explored': [
+        "I think I've seen everything!",
+        "Nowhere new to go.",
+        "I know this place now!",
+    ],
+    'stopping': [
+        "Okay, taking a break!",
+        "That was fun!",
+        "See you later!",
+        "Nap time!",
+    ],
+    'camera_obstacle': [
+        "I see something ahead!",
+        "Watch out!",
+        "Hmm, what's that?",
+    ],
+}
+
+def speak(key_or_text, min_interval=2.0):
+    """Speak with personality. Pass a key from PHRASES or custom text."""
+    global last_speak_time, last_phrase_key
     now = time.time()
     if now - last_speak_time < min_interval:
         return
+
+    # Get phrase - either from PHRASES dict or use as-is
+    if key_or_text in PHRASES:
+        phrases = PHRASES[key_or_text]
+        text = random.choice(phrases)
+        # Avoid repeating the exact same phrase
+        if len(phrases) > 1 and last_phrase_key == key_or_text:
+            while text == getattr(speak, '_last_text', None):
+                text = random.choice(phrases)
+        speak._last_text = text
+        last_phrase_key = key_or_text
+    else:
+        text = key_or_text
+
     last_speak_time = now
+
     def _speak():
         try:
             if ELEVENLABS_AVAILABLE:
-                # Use ElevenLabs premium voice
                 elevenlabs_speak(text, blocking=False)
             else:
-                # Fallback to espeak
                 env = os.environ.copy()
                 env['ALSA_CARD'] = '0'
                 subprocess.run(['espeak', '-s', '150', text],
@@ -83,7 +158,7 @@ def speak(text, min_interval=2.0):
             pass
     threading.Thread(target=_speak, daemon=True).start()
 
-speak("Path planning explorer starting")
+speak("startup")
 
 # ============ OCCUPANCY GRID ============
 # 0 = unknown, 1 = free, 2 = obstacle
@@ -462,7 +537,7 @@ def navigate_to_goal(goal_x, goal_y, dist):
 # ============ MAIN LOOP ============
 print("\n[4/4] Exploring with path planning...")
 print("-" * 50)
-speak("Ready. Starting smart exploration.")
+speak("startup")
 
 scan_iter = lidar.iter_scans(max_buf_meas=8000, min_len=5)
 moves = 0
@@ -539,7 +614,7 @@ try:
                         action = camera.get_recommended_action(obs)
                         if dist == 'close':
                             print(f"\n  ** CAMERA: obstacle {dist}! -> {action} **")
-                            speak("obstacle ahead", min_interval=3)
+                            speak("camera_obstacle", min_interval=3)
             except Exception as e:
                 pass  # Camera check failed, continue with LiDAR
 
@@ -559,7 +634,7 @@ try:
 
         # STUCK RECOVERY - wheels spinning but robot not moving
         if stuck_counter >= 3:
-            speak("I'm stuck", min_interval=5)
+            speak("stuck", min_interval=5)
             print(f"\n  ** STUCK ({last_move_direction})! Recovering... **")
 
             if last_move_direction == "FORWARD":
@@ -584,6 +659,7 @@ try:
             stuck_counter = 0
             current_goal = None  # Find new goal
             last_action = "UNSTUCK"
+            speak("unstuck", min_interval=2)
             moves += 1
             continue
 
@@ -596,7 +672,7 @@ try:
             if current_goal is None:
                 # No frontiers - exploration might be complete
                 if not exploration_complete:
-                    speak("no more frontiers", min_interval=10)
+                    speak("all_explored", min_interval=10)
                     exploration_complete = True
                 # Wander randomly
                 if front > 0.8:
@@ -612,7 +688,7 @@ try:
                 continue
             else:
                 exploration_complete = False
-                speak("new goal", min_interval=5)
+                speak("new_goal", min_interval=5)
 
         # Navigate to goal
         gx, gy = current_goal
@@ -620,7 +696,7 @@ try:
 
         if goal_dist < GOAL_REACHED_DIST:
             # Reached goal
-            speak("reached goal", min_interval=3)
+            speak("reached", min_interval=3)
             current_goal = None
             last_action = "REACHED"
         elif not is_path_clear(robot_x, robot_y, gx, gy):
@@ -656,7 +732,7 @@ try:
 
 except KeyboardInterrupt:
     print("\n\nStopped by user")
-    speak("Stopping")
+    speak("stopping")
 
 # Save map
 print("\nSaving map...")
