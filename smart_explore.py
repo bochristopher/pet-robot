@@ -524,13 +524,13 @@ def navigate_to_goal(goal_x, goal_y, dist):
     # Turn toward goal if needed
     if abs(angle_diff) > 0.3:  # >17 degrees
         if angle_diff > 0:
-            turn_left(0.15)
+            turn_left(0.25)
         else:
-            turn_right(0.15)
+            turn_right(0.25)
         return "TURNING"
 
     # Move forward
-    move_time = min(dist * 0.5, 0.4)
+    move_time = min(dist * 0.8, 0.8)  # Longer moves toward goals
     forward(move_time)
     return "FORWARD"
 
@@ -676,13 +676,13 @@ try:
                     exploration_complete = True
                 # Wander randomly
                 if front > 0.8:
-                    forward(0.3)
+                    forward(0.5)
                     last_action = "WANDER"
                 elif left > right:
-                    turn_left(0.3)
+                    turn_left(0.4)
                     last_action = "WANDER-L"
                 else:
-                    turn_right(0.3)
+                    turn_right(0.4)
                     last_action = "WANDER-R"
                 moves += 1
                 continue
@@ -702,13 +702,13 @@ try:
         elif not is_path_clear(robot_x, robot_y, gx, gy):
             # Path blocked - try to go around
             if front > 0.6:
-                forward(0.3)
+                forward(0.5)
                 last_action = "CLEAR-FWD"
             elif left > right:
-                turn_left(0.3)
+                turn_left(0.4)
                 last_action = "CLEAR-L"
             else:
-                turn_right(0.3)
+                turn_right(0.4)
                 last_action = "CLEAR-R"
             goal_attempts += 1
             if goal_attempts > 10:
@@ -716,10 +716,10 @@ try:
         elif front < 0.5:
             # Immediate obstacle - go around
             if left > right:
-                turn_left(0.25)
+                turn_left(0.35)
                 last_action = "DETOUR-L"
             else:
-                turn_right(0.25)
+                turn_right(0.35)
                 last_action = "DETOUR-R"
             goal_attempts += 1
         else:
