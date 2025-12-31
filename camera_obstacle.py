@@ -12,7 +12,7 @@ import time
 class CameraObstacleDetector:
     """Real-time obstacle detection using camera and OpenCV."""
 
-    def __init__(self, camera_index=0, width=640, height=480):
+    def __init__(self, camera_index=0, width=320, height=240):
         self.camera_index = camera_index
         self.width = width
         self.height = height
@@ -25,6 +25,11 @@ class CameraObstacleDetector:
 
         # Divide into 3 sectors: left, center, right
         self.sector_width = width // 3
+
+        # Edge detection thresholds (tuned for 320x240)
+        # These detect RELATIVE changes - high edge count = complex scene = obstacle
+        self.edge_threshold = 800000     # Obstacle present in sector
+        self.close_threshold = 2500000   # Obstacle very close (total)
 
     def open(self):
         """Open camera."""
@@ -100,22 +105,18 @@ class CameraObstacleDetector:
         center_edges = np.sum(edges[:, sector_w:2*sector_w])
         right_edges = np.sum(edges[:, 2*sector_w:])
 
-        # Thresholds based on edge density
-        # Higher values mean more edges = obstacle present
-        edge_threshold = 50000  # Tune based on testing
-        close_threshold = 150000
-
-        left_blocked = left_edges > edge_threshold
-        center_blocked = center_edges > edge_threshold
-        right_blocked = right_edges > edge_threshold
+        # Check each sector against thresholds
+        left_blocked = left_edges > self.edge_threshold
+        center_blocked = center_edges > self.edge_threshold
+        right_blocked = right_edges > self.edge_threshold
 
         # Estimate distance based on edge density in center
         total_edges = left_edges + center_edges + right_edges
-        if total_edges > close_threshold * 3:
+        if total_edges > self.close_threshold * 3:
             distance = 'close'
-        elif total_edges > edge_threshold * 3:
+        elif total_edges > self.edge_threshold * 3:
             distance = 'medium'
-        elif total_edges > edge_threshold:
+        elif total_edges > self.edge_threshold:
             distance = 'far'
         else:
             distance = 'clear'
