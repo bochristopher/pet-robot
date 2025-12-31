@@ -40,10 +40,10 @@ except:
     ELEVENLABS_AVAILABLE = False
 
 try:
-    from openai_vision import OpenAIVision
-    VISION_AVAILABLE = True
+    from camera_obstacle import CameraObstacleDetector
+    CAMERA_AVAILABLE = True
 except:
-    VISION_AVAILABLE = False
+    CAMERA_AVAILABLE = False
 
 print("=" * 50)
 print("SMART EXPLORER - Path Planning Mode")
@@ -265,13 +265,17 @@ if IMU_AVAILABLE:
     except Exception as e:
         print(f"  Not available: {e}")
 
-# Vision (OpenAI GPT-4V)
-vision = None
-if VISION_AVAILABLE:
-    print("\n[2.7/4] Vision (OpenAI)...")
+# Camera (local obstacle detection)
+camera = None
+if CAMERA_AVAILABLE:
+    print("\n[2.7/4] Camera...")
     try:
-        vision = OpenAIVision()
-        print("  OK")
+        camera = CameraObstacleDetector()
+        if camera.open():
+            print("  OK")
+        else:
+            print("  Failed to open camera")
+            camera = None
     except Exception as e:
         print(f"  Not available: {e}")
 
@@ -523,22 +527,24 @@ try:
         us_front_close = us_fl is not None and ((us_fl > 0 and us_fl < 20) or (us_fr > 0 and us_fr < 20))
         us_back_close = us_back is not None and us_back > 0 and us_back < 25
 
-        # VISION CHECK - every 10 moves or when path seems clear but we should verify
-        vision_blocked = False
-        if vision is not None and moves % 10 == 0 and front > 0.5:
+        # CAMERA CHECK - real-time obstacle detection (every 3 moves for responsiveness)
+        camera_blocked = False
+        if camera is not None and moves % 3 == 0:
             try:
-                obs = vision.detect_obstacles()
-                if obs and not obs.get('path_clear', True):
-                    vision_blocked = True
-                    obstacles = obs.get('obstacles', [])
-                    action = obs.get('recommended_action', 'stop')
-                    print(f"\n  ** VISION: {obstacles} -> {action} **")
-                    speak(f"I see {obstacles[0] if obstacles else 'something'}", min_interval=5)
+                obs = camera.detect_obstacles()
+                if obs:
+                    dist = obs.get('obstacle_distance', 'clear')
+                    if dist in ['close', 'medium'] or not obs.get('path_clear', True):
+                        camera_blocked = True
+                        action = camera.get_recommended_action(obs)
+                        if dist == 'close':
+                            print(f"\n  ** CAMERA: obstacle {dist}! -> {action} **")
+                            speak("obstacle ahead", min_interval=3)
             except Exception as e:
-                pass  # Vision check failed, continue with LiDAR
+                pass  # Camera check failed, continue with LiDAR
 
         # EMERGENCY OBSTACLE AVOIDANCE
-        if us_front_close or front < 0.25 or vision_blocked:
+        if us_front_close or front < 0.25 or camera_blocked:
             if not us_back_close:
                 backward(0.3)
             if left > right:
@@ -670,6 +676,12 @@ try:
     lidar.disconnect()
 except:
     pass
+
+if camera:
+    try:
+        camera.close()
+    except:
+        pass
 
 arduino.close()
 
