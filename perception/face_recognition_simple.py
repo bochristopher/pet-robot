@@ -57,7 +57,8 @@ class FaceRecognizer:
     def detect_faces(self, frame):
         """Detect faces in frame, return list of (x, y, w, h)."""
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = self.face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(80, 80))
+        # More lenient detection: smaller minSize, fewer minNeighbors
+        faces = self.face_cascade.detectMultiScale(gray, 1.1, 3, minSize=(50, 50))
         return faces, gray
 
     def enroll_face(self, name, num_samples=10):
@@ -168,7 +169,8 @@ class FaceRecognizer:
         label, confidence = self.recognizer.predict(face_roi)
 
         # Lower confidence = better match (it's a distance metric)
-        if confidence < 70:
+        # Threshold 85 = more lenient, will recognize with looser match
+        if confidence < 85:
             name = self.labels.get(label, "unknown")
             certainty = max(0, 100 - confidence)  # Convert to percentage
             return name, certainty, "recognized"
