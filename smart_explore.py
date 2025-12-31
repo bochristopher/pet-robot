@@ -13,6 +13,7 @@ import sys
 import subprocess
 import threading
 import math
+import os
 import numpy as np
 from collections import deque
 from rplidar import RPLidar
@@ -31,6 +32,18 @@ try:
     IMU_AVAILABLE = True
 except:
     IMU_AVAILABLE = False
+
+try:
+    from elevenlabs_speaker import speak as elevenlabs_speak
+    ELEVENLABS_AVAILABLE = True
+except:
+    ELEVENLABS_AVAILABLE = False
+
+try:
+    from openai_vision import OpenAIVision
+    VISION_AVAILABLE = True
+except:
+    VISION_AVAILABLE = False
 
 print("=" * 50)
 print("SMART EXPLORER - Path Planning Mode")
@@ -56,8 +69,16 @@ def speak(text, min_interval=2.0):
     last_speak_time = now
     def _speak():
         try:
-            subprocess.run(['espeak', '-s', '150', text],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if ELEVENLABS_AVAILABLE:
+                # Use ElevenLabs premium voice
+                elevenlabs_speak(text, blocking=False)
+            else:
+                # Fallback to espeak
+                env = os.environ.copy()
+                env['ALSA_CARD'] = '0'
+                subprocess.run(['espeak', '-s', '150', text],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             env=env)
         except:
             pass
     threading.Thread(target=_speak, daemon=True).start()
@@ -240,6 +261,16 @@ if IMU_AVAILABLE:
         imu = MPU6050(bus_num=7)
         imu.calibrate(50)
         imu.reset_yaw()
+        print("  OK")
+    except Exception as e:
+        print(f"  Not available: {e}")
+
+# Vision (OpenAI GPT-4V)
+vision = None
+if VISION_AVAILABLE:
+    print("\n[2.7/4] Vision (OpenAI)...")
+    try:
+        vision = OpenAIVision()
         print("  OK")
     except Exception as e:
         print(f"  Not available: {e}")
@@ -492,8 +523,22 @@ try:
         us_front_close = us_fl is not None and ((us_fl > 0 and us_fl < 20) or (us_fr > 0 and us_fr < 20))
         us_back_close = us_back is not None and us_back > 0 and us_back < 25
 
+        # VISION CHECK - every 10 moves or when path seems clear but we should verify
+        vision_blocked = False
+        if vision is not None and moves % 10 == 0 and front > 0.5:
+            try:
+                obs = vision.detect_obstacles()
+                if obs and not obs.get('path_clear', True):
+                    vision_blocked = True
+                    obstacles = obs.get('obstacles', [])
+                    action = obs.get('recommended_action', 'stop')
+                    print(f"\n  ** VISION: {obstacles} -> {action} **")
+                    speak(f"I see {obstacles[0] if obstacles else 'something'}", min_interval=5)
+            except Exception as e:
+                pass  # Vision check failed, continue with LiDAR
+
         # EMERGENCY OBSTACLE AVOIDANCE
-        if us_front_close or front < 0.25:
+        if us_front_close or front < 0.25 or vision_blocked:
             if not us_back_close:
                 backward(0.3)
             if left > right:
