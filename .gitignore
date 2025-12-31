@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+*.egg-info/
+dist/
+build/
+
+# API Keys and Secrets
+.env
+*.key
+*_key.txt
+
+# Cache directories
+/tmp/
+*.cache
+__pycache__
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Audio cache (ElevenLabs)
+elevenlabs_cache/
+
+# Model files (too large for git)
+*.engine
+*.pt
+*.pth
+*.onnx
+*.tflite
+ml_models/
+vosk-model*/
+
+# Test files
+test_*.py
+*_test.py
