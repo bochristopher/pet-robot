@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
-Simple Face Recognition for Robot Pet
-Uses OpenCV's LBPH recognizer - works on Jetson without dlib
+Improved Face Recognition for Robot Pet
+- DNN face detector (more accurate than Haar cascade)
+- Histogram equalization for lighting normalization
+- LBPH recognizer for fast on-device recognition
 """
 
 import cv2
@@ -14,15 +16,33 @@ FACES_DIR = "/home/bo/robot_pet/data/known_faces"
 MODEL_FILE = "/home/bo/robot_pet/data/face_model.yml"
 LABELS_FILE = "/home/bo/robot_pet/data/face_labels.pkl"
 
+# DNN model paths
+DNN_MODEL = "/home/bo/robot_pet/data/models/opencv_face_detector.caffemodel"
+DNN_CONFIG = "/home/bo/robot_pet/data/models/opencv_face_detector.prototxt"
+
+
 class FaceRecognizer:
     def __init__(self):
-        self.face_cascade = cv2.CascadeClassifier(
-            cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-        )
         self.recognizer = cv2.face.LBPHFaceRecognizer_create()
         self.labels = {}
         self.camera = None
         self.trained = False
+        
+        # Try DNN detector first (more accurate), fall back to Haar
+        self.use_dnn = False
+        if os.path.exists(DNN_MODEL) and os.path.exists(DNN_CONFIG):
+            try:
+                self.face_net = cv2.dnn.readNetFromCaffe(DNN_CONFIG, DNN_MODEL)
+                self.use_dnn = True
+                print("[FaceRecog] Using DNN detector (high accuracy)")
+            except Exception as e:
+                print(f"[FaceRecog] DNN failed: {e}, using Haar cascade")
+        
+        if not self.use_dnn:
+            self.face_cascade = cv2.CascadeClassifier(
+                cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+            )
+            print("[FaceRecog] Using Haar cascade detector")
 
         # Load existing model if available
         if os.path.exists(MODEL_FILE) and os.path.exists(LABELS_FILE):
@@ -54,24 +74,88 @@ class FaceRecognizer:
         ret, frame = self.camera.read()
         return frame if ret else None
 
-    def detect_faces(self, frame):
-        """Detect faces in frame, return list of (x, y, w, h)."""
+    def detect_faces_dnn(self, frame):
+        """Detect faces using DNN (more accurate)."""
+        h, w = frame.shape[:2]
+        blob = cv2.dnn.blobFromImage(frame, 1.0, (300, 300), (104, 177, 123))
+        self.face_net.setInput(blob)
+        detections = self.face_net.forward()
+        
+        faces = []
+        for i in range(detections.shape[2]):
+            confidence = detections[0, 0, i, 2]
+            if confidence > 0.5:  # 50% confidence threshold
+                box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
+                x1, y1, x2, y2 = box.astype(int)
+                # Convert to (x, y, w, h) format
+                x, y = max(0, x1), max(0, y1)
+                w_box, h_box = min(w, x2) - x, min(h, y2) - y
+                if w_box > 30 and h_box > 30:
+                    faces.append((x, y, w_box, h_box))
+        
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        # More lenient detection: smaller minSize, fewer minNeighbors
-        faces = self.face_cascade.detectMultiScale(gray, 1.1, 3, minSize=(50, 50))
         return faces, gray
 
-    def enroll_face(self, name, num_samples=10):
-        """Capture face samples and train recognizer."""
+    def detect_faces_haar(self, frame):
+        """Detect faces using Haar cascade (fallback)."""
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = self.face_cascade.detectMultiScale(gray, 1.1, 3, minSize=(50, 50))
+        return list(faces), gray
+
+    def detect_faces(self, frame):
+        """Detect faces in frame, return list of (x, y, w, h)."""
+        if self.use_dnn:
+            return self.detect_faces_dnn(frame)
+        else:
+            return self.detect_faces_haar(frame)
+
+    def preprocess_face(self, gray, x, y, w, h):
+        """Extract and preprocess face region."""
+        face_roi = gray[y:y+h, x:x+w]
+        face_roi = cv2.resize(face_roi, (100, 100))
+        # Histogram equalization for lighting normalization
+        face_roi = cv2.equalizeHist(face_roi)
+        return face_roi
+
+    def enroll_face(self, name, num_samples=20):
+        """Capture face samples with guidance for varied angles."""
         os.makedirs(FACES_DIR, exist_ok=True)
         person_dir = os.path.join(FACES_DIR, name)
         os.makedirs(person_dir, exist_ok=True)
 
         print(f"Enrolling {name}...")
-        print("Look at the camera. Capturing 10 samples...")
+        print(f"Capturing {num_samples} samples. Follow the prompts!")
+        print()
 
         samples = []
         sample_count = 0
+        
+        # Prompts for varied angles
+        prompts = [
+            "Look straight at camera",
+            "Look straight at camera", 
+            "Look straight at camera",
+            "Look straight at camera",
+            "Tilt head slightly LEFT",
+            "Tilt head slightly LEFT",
+            "Tilt head slightly RIGHT",
+            "Tilt head slightly RIGHT",
+            "Look slightly UP",
+            "Look slightly UP",
+            "Look slightly DOWN",
+            "Look slightly DOWN",
+            "Move a bit CLOSER",
+            "Move a bit CLOSER",
+            "Move a bit FARTHER",
+            "Move a bit FARTHER",
+            "Look straight again",
+            "Look straight again",
+            "Smile!",
+            "Neutral face",
+        ]
+
+        current_prompt = ""
+        no_face_count = 0
 
         while sample_count < num_samples:
             frame = self.capture_frame()
@@ -80,26 +164,30 @@ class FaceRecognizer:
 
             faces, gray = self.detect_faces(frame)
 
-            if len(faces) == 1:
-                x, y, w, h = faces[0]
-                face_roi = gray[y:y+h, x:x+w]
-                face_roi = cv2.resize(face_roi, (100, 100))
+            if len(faces) >= 1:
+                # Use the largest face
+                x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
+                face_roi = self.preprocess_face(gray, x, y, w, h)
 
                 # Save sample
                 sample_path = os.path.join(person_dir, f"{sample_count}.jpg")
                 cv2.imwrite(sample_path, face_roi)
                 samples.append(face_roi)
                 sample_count += 1
-                print(f"  Captured {sample_count}/{num_samples}")
-                time.sleep(0.3)
-            elif len(faces) == 0:
-                print("  No face detected, move closer...")
+                
+                # Show progress with prompt
+                prompt = prompts[sample_count - 1] if sample_count <= len(prompts) else "Hold still"
+                print(f"  ✓ {sample_count}/{num_samples} - Next: {prompt}")
+                no_face_count = 0
+                time.sleep(0.4)  # Give time to adjust
             else:
-                print("  Multiple faces, need just one...")
+                no_face_count += 1
+                if no_face_count % 10 == 1:  # Don't spam
+                    print("  ... waiting for face (move closer or adjust lighting)")
 
-            time.sleep(0.1)
+            time.sleep(0.05)
 
-        print(f"Captured {len(samples)} samples for {name}")
+        print(f"\n✅ Captured {len(samples)} samples for {name}")
         self._train()
         return True
 
@@ -125,6 +213,8 @@ class FaceRecognizer:
                 img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
                 if img is not None:
                     img = cv2.resize(img, (100, 100))
+                    # Apply same preprocessing
+                    img = cv2.equalizeHist(img)
                     faces.append(img)
                     labels.append(current_label)
 
@@ -160,17 +250,14 @@ class FaceRecognizer:
             return None, 0, "no_face"
 
         # Use the largest face
-        largest = max(faces, key=lambda f: f[2] * f[3])
-        x, y, w, h = largest
-
-        face_roi = gray[y:y+h, x:x+w]
-        face_roi = cv2.resize(face_roi, (100, 100))
+        x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
+        face_roi = self.preprocess_face(gray, x, y, w, h)
 
         label, confidence = self.recognizer.predict(face_roi)
 
         # Lower confidence = better match (it's a distance metric)
-        # Threshold 85 = more lenient, will recognize with looser match
-        if confidence < 85:
+        # Threshold 90 = lenient for histogram-equalized faces
+        if confidence < 90:
             name = self.labels.get(label, "unknown")
             certainty = max(0, 100 - confidence)  # Convert to percentage
             return name, certainty, "recognized"
