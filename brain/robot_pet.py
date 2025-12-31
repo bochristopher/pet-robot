@@ -21,16 +21,16 @@ import signal
 import threading
 from typing import Optional
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add robot_pet root to path for imports
+sys.path.insert(0, '/home/bo/robot_pet')
 
-# Import robot modules
-from whisper_listener import WhisperListener as VoiceListener, get_listener
-from elevenlabs_speaker import ElevenLabsSpeaker, get_speaker
-from openai_vision import OpenAIVision, get_vision
-from motor_interface import MotorInterface, get_motors
-from robot_brain import RobotBrain, get_brain, BrainResponse
-from vision_only_explore import VisionOnlyExplorer
+# Import robot modules using package structure
+from voice.whisper_listener import WhisperListener as VoiceListener, get_listener
+from voice.elevenlabs_speaker import ElevenLabsSpeaker, get_speaker
+from perception.openai_vision import OpenAIVision, get_vision
+from actuators.motor_interface import MotorInterface, get_motors
+from brain.robot_brain import RobotBrain, get_brain, BrainResponse
+from scripts.vision_only_explore import VisionOnlyExplorer
 
 
 # =============================================================================

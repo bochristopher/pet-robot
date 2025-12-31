@@ -205,9 +205,9 @@ class OccupancyMap:
     def save(self, filepath: str = None) -> str:
         """Save map to file."""
         if filepath is None:
-            os.makedirs("/home/bo/robot_pet/maps", exist_ok=True)
+            os.makedirs("/home/bo/robot_pet/data/maps", exist_ok=True)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filepath = f"/home/bo/robot_pet/maps/floor_plan_{timestamp}.json"
+            filepath = f"/home/bo/robot_pet/data/maps/floor_plan_{timestamp}.json"
 
         data = {
             "config": {
@@ -240,9 +240,9 @@ class OccupancyMap:
             return None
 
         if filepath is None:
-            os.makedirs("/home/bo/robot_pet/maps", exist_ok=True)
+            os.makedirs("/home/bo/robot_pet/data/maps", exist_ok=True)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filepath = f"/home/bo/robot_pet/maps/floor_plan_{timestamp}.png"
+            filepath = f"/home/bo/robot_pet/data/maps/floor_plan_{timestamp}.png"
 
         # Create RGB image
         img = np.zeros((self.height, self.width, 3), dtype=np.uint8)

@@ -20,30 +20,36 @@ from rplidar import RPLidar
 
 sys.path.insert(0, '/home/bo/robot_pet')
 
-# Optional imports
+# Optional imports - using new package structure
 try:
-    from ultrasonic import UltrasonicSensors
+    from sensors.ultrasonic import UltrasonicSensors
     ULTRASONIC_AVAILABLE = True
 except:
     ULTRASONIC_AVAILABLE = False
 
 try:
-    from imu_mpu6050 import MPU6050
+    from sensors.imu_mpu6050 import MPU6050
     IMU_AVAILABLE = True
 except:
     IMU_AVAILABLE = False
 
 try:
-    from elevenlabs_speaker import speak as elevenlabs_speak
+    from voice.elevenlabs_speaker import speak as elevenlabs_speak
     ELEVENLABS_AVAILABLE = True
 except:
     ELEVENLABS_AVAILABLE = False
 
 try:
-    from camera_obstacle import CameraObstacleDetector
+    from sensors.camera_obstacle import CameraObstacleDetector
     CAMERA_AVAILABLE = True
 except:
     CAMERA_AVAILABLE = False
+
+try:
+    from perception.face_recognition_simple import FaceRecognizer
+    FACE_RECOGNITION_AVAILABLE = True
+except:
+    FACE_RECOGNITION_AVAILABLE = False
 
 print("=" * 50)
 print("SMART EXPLORER - Path Planning Mode")
@@ -129,6 +135,19 @@ PHRASES = {
         "My eyes don't lie!",
         "Suspicious object detected!",
         "What's that doing here?",
+    ],
+    'greet_bo': [
+        "Hey Bo!",
+        "Hi Bo, what's up?",
+        "Oh hi Bo!",
+        "Bo! Good to see you!",
+        "There's my favorite human!",
+    ],
+    'greet_stranger': [
+        "Who are you?",
+        "I don't recognize you.",
+        "New face detected!",
+        "Hello stranger!",
     ],
 }
 
@@ -361,6 +380,21 @@ if CAMERA_AVAILABLE:
         else:
             print("  Failed to open camera")
             camera = None
+    except Exception as e:
+        print(f"  Not available: {e}")
+
+# Face Recognition
+face_recognizer = None
+last_greeted = {}  # Track when we greeted each person
+if FACE_RECOGNITION_AVAILABLE:
+    print("\n[2.8/4] Face Recognition...")
+    try:
+        face_recognizer = FaceRecognizer()
+        if face_recognizer.trained:
+            print(f"  OK - knows {len(face_recognizer.labels)} people")
+        else:
+            print("  No faces enrolled yet")
+            face_recognizer = None
     except Exception as e:
         print(f"  Not available: {e}")
 
@@ -628,6 +662,27 @@ try:
             except Exception as e:
                 pass  # Camera check failed, continue with LiDAR
 
+        # FACE RECOGNITION - greet people we see (every 10 moves)
+        if face_recognizer is not None and moves % 10 == 0:
+            try:
+                name, certainty = face_recognizer.who_is_there()
+                if name and certainty > 20:
+                    now = time.time()
+                    last_time = last_greeted.get(name, 0)
+                    if now - last_time > 60:  # Don't greet same person within 60s
+                        last_greeted[name] = now
+                        if name.lower() == "bo":
+                            speak("greet_bo", min_interval=5)
+                            print(f"\n  ** Recognized: {name} ({certainty:.0f}%)! **")
+                        elif name == "stranger":
+                            speak("greet_stranger", min_interval=10)
+                            print(f"\n  ** Unknown person detected! **")
+                        else:
+                            speak(f"Hi {name}!", min_interval=5)
+                            print(f"\n  ** Recognized: {name} ({certainty:.0f}%)! **")
+            except Exception as e:
+                pass  # Face check failed, continue
+
         # EMERGENCY OBSTACLE AVOIDANCE
         if us_front_close or front < 0.25 or camera_blocked:
             if not us_back_close:
@@ -747,8 +802,8 @@ except KeyboardInterrupt:
 # Save map
 print("\nSaving map...")
 try:
-    np.save('/home/bo/robot_pet/exploration_map.npy', grid)
-    print(f"  Saved to exploration_map.npy ({np.sum(grid > 0)} cells explored)")
+    np.save('/home/bo/robot_pet/data/exploration_map.npy', grid)
+    print(f"  Saved to data/exploration_map.npy ({np.sum(grid > 0)} cells explored)")
 except Exception as e:
     print(f"  Could not save: {e}")
 
@@ -766,6 +821,12 @@ except:
 if camera:
     try:
         camera.close()
+    except:
+        pass
+
+if face_recognizer:
+    try:
+        face_recognizer.close_camera()
     except:
         pass
 

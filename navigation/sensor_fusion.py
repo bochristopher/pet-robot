@@ -18,11 +18,13 @@ This approach gives:
 """
 
 import time
+import sys
 from typing import Optional
 from dataclasses import dataclass
 
-from lidar_detector import LidarScan, LidarDetector
-from openai_vision import OpenAIVision
+sys.path.insert(0, '/home/bo/robot_pet')
+from perception.lidar_detector import LidarScan, LidarDetector
+from perception.openai_vision import OpenAIVision
 
 
 @dataclass

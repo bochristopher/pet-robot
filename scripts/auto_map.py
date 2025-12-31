@@ -13,16 +13,19 @@ import os
 from datetime import datetime
 from rplidar import RPLidar
 
+import sys
+sys.path.insert(0, '/home/bo/robot_pet')
+
 # Try to import ultrasonic sensors
 try:
-    from ultrasonic import UltrasonicSensors
+    from sensors.ultrasonic import UltrasonicSensors
     ULTRASONIC_AVAILABLE = True
 except:
     ULTRASONIC_AVAILABLE = False
 
 # Try to import navigation (encoder + IMU fusion)
 try:
-    from navigation import Navigation
+    from navigation.navigation import Navigation
     NAVIGATION_AVAILABLE = True
 except:
     NAVIGATION_AVAILABLE = False
@@ -188,7 +191,7 @@ def turn_r():
         robot_theta -= 0.5
 
 def save_map():
-    os.makedirs("/home/bo/robot_pet/maps", exist_ok=True)
+    os.makedirs("/home/bo/robot_pet/data/maps", exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     img = np.zeros((MAP_CELLS, MAP_CELLS, 3), dtype=np.uint8)
@@ -204,7 +207,7 @@ def save_map():
     cv2.circle(img, (rx, ry), 5, (0, 255, 0), -1)
     img = cv2.flip(img, 0)
 
-    p = f"/home/bo/robot_pet/maps/floor_{ts}.png"
+    p = f"/home/bo/robot_pet/data/maps/floor_{ts}.png"
     cv2.imwrite(p, img)
     return p
 

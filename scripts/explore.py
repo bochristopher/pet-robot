@@ -11,9 +11,12 @@ import subprocess
 import threading
 from rplidar import RPLidar
 
+import sys
+sys.path.insert(0, '/home/bo/robot_pet')
+
 # Try to import ultrasonic sensors
 try:
-    from ultrasonic import UltrasonicSensors
+    from sensors.ultrasonic import UltrasonicSensors
     ULTRASONIC_AVAILABLE = True
 except:
     ULTRASONIC_AVAILABLE = False

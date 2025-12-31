@@ -31,11 +31,11 @@ import base64
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
 
-# Add parent directory for imports
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add robot_pet root to path for imports
+sys.path.insert(0, '/home/bo/robot_pet')
 
-from motor_interface import get_motors
-from elevenlabs_speaker import get_speaker
+from actuators.motor_interface import get_motors
+from voice.elevenlabs_speaker import get_speaker
 
 
 # =============================================================================
@@ -612,10 +612,10 @@ Focus on the main objects and their positions. Be concise - this will be spoken 
         # Save to log file
         import json
         from datetime import datetime
-        log_path = f"/home/bo/robot_pet/logs/vision_explore_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        log_path = f"/home/bo/robot_pet/data/logs/vision_explore_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         
         # Create logs directory
-        os.makedirs("/home/bo/robot_pet/logs", exist_ok=True)
+        os.makedirs("/home/bo/robot_pet/data/logs", exist_ok=True)
         
         with open(log_path, 'w') as f:
             json.dump({

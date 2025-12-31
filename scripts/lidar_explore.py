@@ -29,16 +29,16 @@ from typing import Optional
 from dataclasses import dataclass
 from datetime import datetime
 
-# Add parent directory for imports
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add robot_pet root to path for imports
+sys.path.insert(0, '/home/bo/robot_pet')
 
-from lidar_detector import LidarDetector, LidarScan
-from motor_interface import get_motors
-from elevenlabs_speaker import get_speaker
+from perception.lidar_detector import LidarDetector, LidarScan
+from actuators.motor_interface import get_motors
+from voice.elevenlabs_speaker import get_speaker
 
 # Optional sensor fusion (camera + LiDAR)
 try:
-    from sensor_fusion import SensorFusion, create_fusion
+    from navigation.sensor_fusion import SensorFusion, create_fusion
     SENSOR_FUSION_AVAILABLE = True
 except ImportError:
     SENSOR_FUSION_AVAILABLE = False
@@ -581,8 +581,8 @@ class LidarExplorer:
 
         # Save log
         import json
-        os.makedirs("/home/bo/robot_pet/logs", exist_ok=True)
-        log_path = f"/home/bo/robot_pet/logs/lidar_explore_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        os.makedirs("/home/bo/robot_pet/data/logs", exist_ok=True)
+        log_path = f"/home/bo/robot_pet/data/logs/lidar_explore_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
 
         with open(log_path, 'w') as f:
             json.dump({
