@@ -256,10 +256,11 @@ class FaceRecognizer:
         label, confidence = self.recognizer.predict(face_roi)
 
         # Lower confidence = better match (it's a distance metric)
-        # Threshold 90 = lenient for histogram-equalized faces
-        if confidence < 90:
+        # Threshold 120 = lenient, allows some variation
+        if confidence < 120:
             name = self.labels.get(label, "unknown")
-            certainty = max(0, 100 - confidence)  # Convert to percentage
+            # Convert to 0-100% scale where 120=0% and 0=100%
+            certainty = max(0, min(100, (120 - confidence) / 120 * 100))
             return name, certainty, "recognized"
         else:
             return None, 0, "unknown_face"
