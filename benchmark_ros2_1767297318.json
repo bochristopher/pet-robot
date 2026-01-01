@@ -1,0 +1,28 @@
+{
+  "system": "ROS2_Nav2_Explorer",
+  "total_time": 22.829412698745728,
+  "final_cells_mapped": 1964,
+  "goals_sent": 0,
+  "goals_reached": 0,
+  "goals_failed": 0,
+  "distance_traveled": 0.0,
+  "mapping_history": [
+    [
+      5.242311954498291,
+      1964
+    ],
+    [
+      11.24120044708252,
+      1964
+    ],
+    [
+      15.241933584213257,
+      1964
+    ],
+    [
+      21.24179983139038,
+      1964
+    ]
+  ],
+  "efficiency": 19640.0
+}
