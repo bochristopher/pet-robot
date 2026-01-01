@@ -51,6 +51,12 @@ try:
 except:
     FACE_RECOGNITION_AVAILABLE = False
 
+try:
+    from voice_commander import VoiceCommander, parse_command
+    VOICE_AVAILABLE = True
+except:
+    VOICE_AVAILABLE = False
+
 print("=" * 50)
 print("SMART EXPLORER - Path Planning Mode")
 print("=" * 50)
@@ -148,6 +154,41 @@ PHRASES = {
         "I don't recognize you.",
         "New face detected!",
         "Hello stranger!",
+    ],
+    'listening': [
+        "I'm listening!",
+        "What's up?",
+        "Yes?",
+    ],
+    'ok_stop': [
+        "Okay, stopping!",
+        "Alright, I'll wait.",
+        "Fine, taking a break.",
+    ],
+    'ok_explore': [
+        "Back to exploring!",
+        "Let's keep going!",
+        "Adventure continues!",
+    ],
+    'ok_turn': [
+        "Turning!",
+        "On it!",
+        "Spinning!",
+    ],
+    'ok_forward': [
+        "Moving forward!",
+        "Here I go!",
+        "Charging ahead!",
+    ],
+    'ok_dance': [
+        "Watch my moves!",
+        "Dance time!",
+        "Check this out!",
+    ],
+    'ok_quiet': [
+        "Fine, I'll be quiet.",
+        "Shh okay.",
+        "Zipping my lips.",
     ],
 }
 
@@ -398,6 +439,19 @@ if FACE_RECOGNITION_AVAILABLE:
     except Exception as e:
         print(f"  Not available: {e}")
 
+# Voice Commander
+voice = None
+paused = False  # Pause exploration when commanded
+quiet_mode = False  # Suppress voice when commanded
+if VOICE_AVAILABLE:
+    print("\n[2.9/4] Voice Commander...")
+    try:
+        voice = VoiceCommander()
+        voice.start()
+        print("  OK - listening for commands")
+    except Exception as e:
+        print(f"  Not available: {e}")
+
 # LiDAR
 print("\n[3/4] LiDAR...")
 lidar = RPLidar('/dev/ttyUSB0')
@@ -592,6 +646,75 @@ exploration_complete = False
 
 try:
     while True:
+        # VOICE COMMAND CHECK
+        if voice:
+            cmd_text = voice.get_command_nowait()
+            if cmd_text:
+                cmd = parse_command(cmd_text)
+                print(f"\n  ** VOICE: \"{cmd_text}\" -> {cmd} **")
+
+                if cmd == 'stop':
+                    if not quiet_mode:
+                        speak("ok_stop", min_interval=0)
+                    paused = True
+                    motor("STOP")
+
+                elif cmd == 'explore':
+                    if not quiet_mode:
+                        speak("ok_explore", min_interval=0)
+                    paused = False
+
+                elif cmd == 'turn_left':
+                    if not quiet_mode:
+                        speak("ok_turn", min_interval=0)
+                    turn_left(0.5)
+
+                elif cmd == 'turn_right':
+                    if not quiet_mode:
+                        speak("ok_turn", min_interval=0)
+                    turn_right(0.5)
+
+                elif cmd == 'turn_around':
+                    if not quiet_mode:
+                        speak("ok_turn", min_interval=0)
+                    turn_right(1.5)
+
+                elif cmd == 'forward':
+                    if not quiet_mode:
+                        speak("ok_forward", min_interval=0)
+                    forward(0.8)
+
+                elif cmd == 'backward':
+                    backward(0.5)
+
+                elif cmd == 'dance':
+                    if not quiet_mode:
+                        speak("ok_dance", min_interval=0)
+                    for _ in range(3):
+                        turn_left(0.3)
+                        turn_right(0.6)
+                        turn_left(0.3)
+
+                elif cmd == 'quiet':
+                    speak("ok_quiet", min_interval=0)
+                    quiet_mode = True
+
+                elif cmd == 'speak':
+                    quiet_mode = False
+                    speak("startup", min_interval=0)
+
+                elif cmd == 'status':
+                    explored = np.sum(grid > 0)
+                    speak(f"I've mapped {explored} cells in {moves} moves", min_interval=0)
+
+                elif cmd == 'where':
+                    speak(f"I'm at position {robot_x:.1f}, {robot_y:.1f}", min_interval=0)
+
+        # If paused, just wait
+        if paused:
+            time.sleep(0.1)
+            continue
+
         # Get LiDAR scan
         try:
             scan = next(scan_iter)
@@ -827,6 +950,12 @@ if camera:
 if face_recognizer:
     try:
         face_recognizer.close_camera()
+    except:
+        pass
+
+if voice:
+    try:
+        voice.stop()
     except:
         pass
 
