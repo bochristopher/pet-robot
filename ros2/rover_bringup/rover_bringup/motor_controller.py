@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Motor Controller Node - Mecanum/Holonomic Drive
-Sends MECANUM command with 4 wheel PWM values.
+With velocity timeout safety feature.
 """
 
 import rclpy
@@ -22,6 +22,7 @@ class MotorController(Node):
         self.declare_parameter("max_linear", 0.5)
         self.declare_parameter("max_angular", 2.0)
         self.declare_parameter("max_pwm", 180)
+        self.declare_parameter("cmd_timeout", 0.5)  # Stop if no cmd for 0.5s
         self.declare_parameter("ultrasonic_sensors", ["front_left", "front_right", "back_center"])
 
         self.serial_port = self.get_parameter("serial_port").value
@@ -29,10 +30,14 @@ class MotorController(Node):
         self.max_linear = self.get_parameter("max_linear").value
         self.max_angular = self.get_parameter("max_angular").value
         self.max_pwm = self.get_parameter("max_pwm").value
+        self.cmd_timeout = self.get_parameter("cmd_timeout").value
         self.ultrasonic_names = self.get_parameter("ultrasonic_sensors").value
 
         self.serial = None
         self.connect_serial()
+
+        self.last_cmd_time = time.time()
+        self.is_moving = False
 
         self.cmd_vel_sub = self.create_subscription(
             Twist, "cmd_vel", self.cmd_vel_callback, 10
@@ -47,9 +52,10 @@ class MotorController(Node):
             )
 
         self.read_state = 0
-        self.create_timer(0.05, self.read_sensors)
+        self.create_timer(0.05, self.timer_callback)
 
         self.get_logger().info(f"Mecanum motor controller started on {self.serial_port}")
+        self.get_logger().info(f"Velocity timeout: {self.cmd_timeout}s")
 
     def connect_serial(self):
         try:
@@ -68,27 +74,22 @@ class MotorController(Node):
         if self.serial is None:
             return
 
-        # Get velocities
-        vx = msg.linear.x / self.max_linear   # forward/backward normalized
-        vy = -msg.linear.y / self.max_linear   # strafe normalized
-        wz = msg.angular.z / self.max_angular # rotation normalized
+        self.last_cmd_time = time.time()
 
-        # Clamp to -1 to 1
+        vx = msg.linear.x / self.max_linear
+        vy = -msg.linear.y / self.max_linear  # Inverted for correct strafe
+        wz = msg.angular.z / self.max_angular
+
         vx = max(-1.0, min(1.0, vx))
         vy = max(-1.0, min(1.0, vy))
         wz = max(-1.0, min(1.0, wz))
 
-        # Mecanum kinematics: compute wheel speeds
-        # LF = vx + vy + wz
-        # RF = vx - vy - wz
-        # LR = vx - vy + wz
-        # RR = vx + vy - wz
+        # Mecanum kinematics
         lf = vx + vy + wz
         rf = vx - vy - wz
         lr = vx - vy + wz
         rr = vx + vy - wz
 
-        # Normalize if any exceeds 1.0
         max_val = max(abs(lf), abs(rf), abs(lr), abs(rr))
         if max_val > 1.0:
             lf /= max_val
@@ -96,11 +97,12 @@ class MotorController(Node):
             lr /= max_val
             rr /= max_val
 
-        # Convert to PWM
         lf_pwm = int(lf * self.max_pwm)
         rf_pwm = int(rf * self.max_pwm)
         lr_pwm = int(lr * self.max_pwm)
         rr_pwm = int(rr * self.max_pwm)
+
+        self.is_moving = any([lf_pwm, rf_pwm, lr_pwm, rr_pwm])
 
         try:
             command = f"MECANUM,{lf_pwm},{rf_pwm},{lr_pwm},{rr_pwm}\n"
@@ -108,10 +110,20 @@ class MotorController(Node):
         except serial.SerialException as e:
             self.get_logger().error(f"Serial write error: {e}")
 
-    def read_sensors(self):
+    def timer_callback(self):
         if self.serial is None:
             return
 
+        # Check for velocity timeout
+        if self.is_moving and (time.time() - self.last_cmd_time) > self.cmd_timeout:
+            self.get_logger().info("Velocity timeout - stopping motors")
+            try:
+                self.serial.write(b"STOP\n")
+                self.is_moving = False
+            except serial.SerialException:
+                pass
+
+        # Read sensors
         try:
             if self.read_state == 0:
                 self.serial.write(b"ENCODER\n")

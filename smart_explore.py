@@ -14,11 +14,23 @@ import subprocess
 import threading
 import math
 import os
+import signal
 import numpy as np
 from collections import deque
 from rplidar import RPLidar
 
 sys.path.insert(0, '/home/bo/robot_pet')
+
+# Signal handling for clean shutdown with Ctrl+C
+running = True
+
+def signal_handler(sig, frame):
+    global running
+    print("\n[Signal] Shutting down...")
+    running = False
+
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
 
 # Optional imports
 try:
@@ -56,6 +68,22 @@ try:
     VOICE_AVAILABLE = True
 except:
     VOICE_AVAILABLE = False
+
+try:
+    from safety_monitor import SafetyMonitor, ThreatLevel, Direction
+    from movement_controller import MovementController, MovementResult
+    SAFETY_AVAILABLE = True
+except Exception as e:
+    print(f"[Warning] Safety system not available: {e}")
+    SAFETY_AVAILABLE = False
+
+try:
+    sys.path.insert(0, '/home/bo/robot_pet/slam')
+    from slam import SLAM
+    SLAM_AVAILABLE = True
+except Exception as e:
+    print(f"[Warning] SLAM not available: {e}")
+    SLAM_AVAILABLE = False
 
 print("=" * 50)
 print("SMART EXPLORER - Path Planning Mode")
@@ -452,6 +480,10 @@ if VOICE_AVAILABLE:
     except Exception as e:
         print(f"  Not available: {e}")
 
+# Safety Monitor & Movement Controller (initialized after LiDAR)
+safety = None
+movement = None
+
 # LiDAR
 print("\n[3/4] LiDAR...")
 lidar = RPLidar('/dev/ttyUSB0')
@@ -466,7 +498,50 @@ lidar.start_motor()
 time.sleep(2)
 print("  OK")
 
-# ============ ODOMETRY ============
+# Safety Monitor & Movement Controller
+if SAFETY_AVAILABLE:
+    print("\n[3.5/4] Safety System...")
+    try:
+        # SafetyMonitor uses ultrasonic as primary (fast, reliable)
+        # LiDAR data fed from main loop via update_lidar_scan()
+        safety = SafetyMonitor(
+            arduino=arduino,
+            ultrasonic=ultrasonic,
+            camera=camera
+        )
+        safety.start()
+
+        movement = MovementController(arduino, safety)
+        print("  OK - ultrasonic @ 50+ Hz, LiDAR from main loop")
+    except Exception as e:
+        print(f"  Failed: {e}")
+        import traceback
+        traceback.print_exc()
+        safety = None
+        movement = None
+
+# ============ UNIFIED SLAM SYSTEM ============
+slam_system = None
+if SLAM_AVAILABLE:
+    print("\n[3.6/4] SLAM System...")
+    try:
+        slam_system = SLAM(
+            arduino=arduino,
+            imu=imu,
+            map_path="/home/bo/robot_pet/slam/maps/exploration_map.npz",
+            use_scan_matching=True,
+            use_loop_closure=True,
+            auto_save_interval=60
+        )
+        slam_system.start()
+        print("  OK - full SLAM with scan matching & loop closure")
+    except Exception as e:
+        print(f"  Failed: {e}")
+        import traceback
+        traceback.print_exc()
+        slam_system = None
+
+# Fallback variables for odometry
 robot_x = 0.0
 robot_y = 0.0
 robot_theta = 0.0
@@ -479,12 +554,23 @@ TICKS_PER_METER = 1000  # Encoder ticks per meter (adjust!)
 # Stuck detection
 last_move_direction = None  # "FORWARD", "LEFT", "RIGHT", "BACKWARD"
 stuck_counter = 0
+consecutive_stuck = 0  # How many times stuck in a row (for super stuck detection)
+last_mapped_cells = 0  # Track if we're actually making progress
 
 def update_odometry():
-    """Update robot position from encoders and IMU."""
+    """Update robot position from SLAM or encoders."""
     global robot_x, robot_y, robot_theta
     global last_left_enc, last_right_enc
 
+    # Use SLAM system if available (pose is updated via slam_system.update())
+    if slam_system:
+        pose = slam_system.get_pose()
+        robot_x = pose.x
+        robot_y = pose.y
+        robot_theta = pose.theta
+        return
+
+    # Fallback to old inline odometry
     left_enc, right_enc = get_encoders()
 
     # Calculate deltas
@@ -499,7 +585,6 @@ def update_odometry():
         try:
             robot_theta = math.radians(imu.get_heading())
         except:
-            # Fall back to encoder-based heading
             d_theta = (d_right - d_left) / WHEEL_BASE
             robot_theta += d_theta
     else:
@@ -525,10 +610,22 @@ def forward(duration):
     global stuck_counter, last_move_direction
     before_x, before_y = robot_x, robot_y
 
-    motor("FORWARD")
-    time.sleep(duration)
-    motor("STOP")
-    update_odometry()
+    # Use MovementController if available (interruptible with safety checks)
+    if movement is not None:
+        result = movement.forward(duration)
+        update_odometry()
+        if result.result == MovementResult.ABORTED_OBSTACLE:
+            stuck_counter = 0  # Not stuck, just blocked
+            return result.result
+        elif result.result == MovementResult.ABORTED_EMERGENCY:
+            stuck_counter = 0
+            return result.result
+    else:
+        # Fallback to blocking movement
+        motor("FORWARD")
+        time.sleep(duration)
+        motor("STOP")
+        update_odometry()
 
     # Check if we actually moved
     dist_moved = math.sqrt((robot_x - before_x)**2 + (robot_y - before_y)**2)
@@ -537,15 +634,23 @@ def forward(duration):
         last_move_direction = "FORWARD"
     else:
         stuck_counter = 0
+    return MovementResult.SUCCESS if movement else None
 
 def backward(duration):
     global stuck_counter, last_move_direction
     before_x, before_y = robot_x, robot_y
 
-    motor("BACKWARD")
-    time.sleep(duration)
-    motor("STOP")
-    update_odometry()
+    if movement is not None:
+        result = movement.backward(duration)
+        update_odometry()
+        if result.result in (MovementResult.ABORTED_OBSTACLE, MovementResult.ABORTED_EMERGENCY):
+            stuck_counter = 0
+            return result.result
+    else:
+        motor("BACKWARD")
+        time.sleep(duration)
+        motor("STOP")
+        update_odometry()
 
     dist_moved = math.sqrt((robot_x - before_x)**2 + (robot_y - before_y)**2)
     if dist_moved < 0.02:
@@ -553,15 +658,23 @@ def backward(duration):
         last_move_direction = "BACKWARD"
     else:
         stuck_counter = 0
+    return MovementResult.SUCCESS if movement else None
 
 def turn_left(duration):
     global stuck_counter, last_move_direction
     before_theta = robot_theta
 
-    motor("LEFT")
-    time.sleep(duration)
-    motor("STOP")
-    update_odometry()
+    if movement is not None:
+        result = movement.turn_left(duration)
+        update_odometry()
+        if result.result == MovementResult.ABORTED_EMERGENCY:
+            stuck_counter = 0
+            return result.result
+    else:
+        motor("LEFT")
+        time.sleep(duration)
+        motor("STOP")
+        update_odometry()
 
     # Check if heading changed
     theta_diff = abs(robot_theta - before_theta)
@@ -570,15 +683,23 @@ def turn_left(duration):
         last_move_direction = "LEFT"
     else:
         stuck_counter = 0
+    return MovementResult.SUCCESS if movement else None
 
 def turn_right(duration):
     global stuck_counter, last_move_direction
     before_theta = robot_theta
 
-    motor("RIGHT")
-    time.sleep(duration)
-    motor("STOP")
-    update_odometry()
+    if movement is not None:
+        result = movement.turn_right(duration)
+        update_odometry()
+        if result.result == MovementResult.ABORTED_EMERGENCY:
+            stuck_counter = 0
+            return result.result
+    else:
+        motor("RIGHT")
+        time.sleep(duration)
+        motor("STOP")
+        update_odometry()
 
     theta_diff = abs(robot_theta - before_theta)
     if theta_diff < 0.05:
@@ -586,6 +707,7 @@ def turn_right(duration):
         last_move_direction = "RIGHT"
     else:
         stuck_counter = 0
+    return MovementResult.SUCCESS if movement else None
 
 def turn_to_angle(target_theta):
     """Turn to face a specific angle."""
@@ -645,7 +767,7 @@ last_action = "START"
 exploration_complete = False
 
 try:
-    while True:
+    while running:
         # VOICE COMMAND CHECK
         if voice:
             cmd_text = voice.get_command_nowait()
@@ -752,6 +874,19 @@ try:
         left = min(sectors['left']) if sectors['left'] else 9.0
         right = min(sectors['right']) if sectors['right'] else 9.0
 
+        # Feed LiDAR data to safety monitor (converts m to cm)
+        if safety:
+            safety.update_lidar_scan(front * 100, left * 100, right * 100)
+
+        # Update SLAM system with new scan (handles mapping + pose correction)
+        if slam_system:
+            slam_system.update(scan)
+            # Get corrected pose from SLAM
+            pose = slam_system.get_pose()
+            robot_x = pose.x
+            robot_y = pose.y
+            robot_theta = pose.theta
+
         us_fl, us_fr, us_back = get_ultrasonic()
 
         # Status display
@@ -762,6 +897,12 @@ try:
             goal_str = f" Goal:{goal_dist:.1f}m"
 
         explored = np.sum(grid > 0)
+
+        # Reset consecutive_stuck if we're making real mapping progress
+        if explored > last_mapped_cells + 50:  # Need at least 50 new cells
+            consecutive_stuck = 0
+            last_mapped_cells = explored
+
         print(f"\rMove {moves:3d} | Pos:({robot_x:.1f},{robot_y:.1f}) θ:{math.degrees(robot_theta):.0f}° | F:{front:.1f} L:{left:.1f} R:{right:.1f}{goal_str} | Mapped:{explored} [{last_action}]     ", end="")
         sys.stdout.flush()
 
@@ -806,14 +947,55 @@ try:
             except Exception as e:
                 pass  # Face check failed, continue
 
-        # EMERGENCY OBSTACLE AVOIDANCE
-        if us_front_close or front < 0.25 or camera_blocked:
+        # EMERGENCY OBSTACLE AVOIDANCE - only trigger on FRONT obstacles
+        # Side obstacles should influence turn direction, not trigger emergency
+        emergency_obstacle = False
+
+        # Check FRONT distance only for emergency (not sides!)
+        front_danger = front < 0.30  # 30cm front threshold
+
+        if front_danger:
+            emergency_obstacle = True
+            if safety:
+                safety.clear_emergency()  # Allow recovery movements
+        elif us_front_close or camera_blocked:
+            emergency_obstacle = True
+            if safety:
+                safety.clear_emergency()
+
+        if emergency_obstacle:
+            # Enter recovery mode to allow escape maneuvers
+            if safety:
+                safety.enter_recovery_mode(2.5)
+
+            # Use RAW motor commands for emergency escape
+            # Back up more aggressively
             if not us_back_close:
-                backward(0.3)
+                motor("BACKWARD")
+                time.sleep(0.5)
+                motor("STOP")
+                update_odometry()
+
+            # Turn away from closest obstacle - bigger turn
             if left > right:
-                turn_left(0.4)
+                motor("LEFT")
+                time.sleep(0.7)
+                motor("STOP")
             else:
-                turn_right(0.4)
+                motor("RIGHT")
+                time.sleep(0.7)
+                motor("STOP")
+
+            # Small forward to clear the area
+            motor("FORWARD")
+            time.sleep(0.3)
+            motor("STOP")
+            update_odometry()
+
+            # Exit recovery mode
+            if safety:
+                safety.exit_recovery_mode()
+
             current_goal = None  # Cancel current goal
             last_action = "AVOID"
             speak("obstacle", min_interval=3)
@@ -821,28 +1003,86 @@ try:
             continue
 
         # STUCK RECOVERY - wheels spinning but robot not moving
-        if stuck_counter >= 3:
+        if stuck_counter >= 5:  # Increased threshold - odometry is noisy
+            consecutive_stuck += 1
             speak("stuck", min_interval=5)
-            print(f"\n  ** STUCK ({last_move_direction})! Recovering... **")
+            print(f"\n  ** STUCK ({last_move_direction})! Recovering... (x{consecutive_stuck}) **")
 
-            if last_move_direction == "FORWARD":
-                if not us_back_close:
-                    backward(0.5)
-                if left > right:
-                    turn_left(0.6)
-                else:
-                    turn_right(0.6)
-            elif last_move_direction == "BACKWARD":
-                forward(0.3)
-                turn_right(0.5)
-            elif last_move_direction == "LEFT":
-                turn_right(0.6)
-            elif last_move_direction == "RIGHT":
-                turn_left(0.6)
+            # Enter recovery mode for aggressive escape
+            if safety:
+                safety.enter_recovery_mode(4.0)
+
+            # SUPER STUCK - been stuck too many times, do extreme escape
+            if consecutive_stuck >= 3:
+                print("  ** SUPER STUCK - doing 180 degree escape! **")
+                # Full reverse
+                motor("BACKWARD")
+                time.sleep(1.0)
+                motor("STOP")
+                # Full 180 degree turn
+                motor("RIGHT")
+                time.sleep(1.5)
+                motor("STOP")
+                # Forward burst
+                motor("FORWARD")
+                time.sleep(0.8)
+                motor("STOP")
+                consecutive_stuck = 0  # Reset after super escape
             else:
-                if not us_back_close:
-                    backward(0.4)
-                turn_right(0.7)
+                # Normal stuck recovery with RAW motor commands
+                if last_move_direction == "FORWARD":
+                    if not us_back_close:
+                        motor("BACKWARD")
+                        time.sleep(0.6)
+                        motor("STOP")
+                    # Big turn to escape
+                    if left > right:
+                        motor("LEFT")
+                        time.sleep(0.8)
+                        motor("STOP")
+                    else:
+                        motor("RIGHT")
+                        time.sleep(0.8)
+                        motor("STOP")
+                elif last_move_direction == "BACKWARD":
+                    motor("FORWARD")
+                    time.sleep(0.4)
+                    motor("STOP")
+                    motor("RIGHT")
+                    time.sleep(0.7)
+                    motor("STOP")
+                elif last_move_direction == "LEFT":
+                    motor("RIGHT")
+                    time.sleep(0.8)
+                    motor("STOP")
+                    # Try to move after turning
+                    motor("FORWARD")
+                    time.sleep(0.5)
+                    motor("STOP")
+                elif last_move_direction == "RIGHT":
+                    motor("LEFT")
+                    time.sleep(0.8)
+                    motor("STOP")
+                    # Try to move after turning
+                    motor("FORWARD")
+                    time.sleep(0.5)
+                    motor("STOP")
+                else:
+                    if not us_back_close:
+                        motor("BACKWARD")
+                        time.sleep(0.5)
+                        motor("STOP")
+                    motor("RIGHT")
+                    time.sleep(1.0)  # Big turn
+                    motor("STOP")
+                    motor("FORWARD")
+                    time.sleep(0.5)
+                    motor("STOP")
+
+            update_odometry()
+
+            if safety:
+                safety.exit_recovery_mode()
 
             stuck_counter = 0
             current_goal = None  # Find new goal
@@ -887,20 +1127,6 @@ try:
             speak("reached", min_interval=3)
             current_goal = None
             last_action = "REACHED"
-        elif not is_path_clear(robot_x, robot_y, gx, gy):
-            # Path blocked - try to go around
-            if front > 0.6:
-                forward(0.5)
-                last_action = "CLEAR-FWD"
-            elif left > right:
-                turn_left(0.4)
-                last_action = "CLEAR-L"
-            else:
-                turn_right(0.4)
-                last_action = "CLEAR-R"
-            goal_attempts += 1
-            if goal_attempts > 10:
-                current_goal = None  # Give up on this goal
         elif front < 0.5:
             # Immediate obstacle - go around
             if left > right:
@@ -910,6 +1136,31 @@ try:
                 turn_right(0.35)
                 last_action = "DETOUR-R"
             goal_attempts += 1
+        elif front > 0.6:
+            # PRIORITY: Front is clear enough - GO FORWARD! Don't overthink.
+            forward(0.5)
+            last_action = "GO-FWD"
+            goal_attempts += 1
+        elif left > 2.0 or right > 2.0:
+            # A side is wide open - turn that way and go!
+            if left > right:
+                turn_left(0.4)
+                last_action = "OPEN-L"
+            else:
+                turn_right(0.4)
+                last_action = "OPEN-R"
+            goal_attempts += 1
+        elif not is_path_clear(robot_x, robot_y, gx, gy):
+            # Path to goal blocked and front not great - try to go around
+            if left > right:
+                turn_left(0.4)
+                last_action = "CLEAR-L"
+            else:
+                turn_right(0.4)
+                last_action = "CLEAR-R"
+            goal_attempts += 1
+            if goal_attempts > 10:
+                current_goal = None  # Give up on this goal
         else:
             # Navigate toward goal
             last_action = navigate_to_goal(gx, gy, goal_dist)
@@ -933,6 +1184,23 @@ except Exception as e:
 # Cleanup
 print("Cleaning up...")
 motor("STOP")
+
+# Stop SLAM system (saves map on stop)
+if slam_system:
+    try:
+        stats = slam_system.get_stats()
+        print(f"  SLAM: traveled {stats['total_distance_m']:.2f}m, "
+              f"{stats['scans_processed']} scans, {stats['loop_closures']} loop closures")
+        slam_system.stop()
+    except:
+        pass
+
+# Stop safety monitor
+if safety:
+    try:
+        safety.stop()
+    except:
+        pass
 
 try:
     lidar.stop()
