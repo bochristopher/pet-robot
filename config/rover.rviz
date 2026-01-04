@@ -1,0 +1,94 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Line Style:
+        Value: Lines
+      Normal Cell Count: 0
+      Plane: XY
+      Plane Cell Count: 20
+      Reference Frame: <Fixed Frame>
+
+    - Class: rviz_default_plugins/LaserScan
+      Name: LaserScan
+      Enabled: true
+      Topic:
+        Value: /scan
+      Size (m): 0.03
+      Color Transformer: Intensity
+      Decay Time: 0
+
+    - Class: rviz_default_plugins/Image
+      Name: Camera
+      Enabled: true
+      Topic:
+        Value: /camera/image_raw
+      Transport Hint: raw
+
+    - Class: rviz_default_plugins/Imu
+      Name: IMU
+      Enabled: true
+      Topic:
+        Value: /imu/data_raw
+      Box Alpha: 1
+      Enabled Acceleration: true
+      Enabled Axes: true
+
+    - Class: rviz_default_plugins/Range
+      Name: Ultrasonic Front
+      Enabled: true
+      Topic:
+        Value: /ultrasonic/front
+      Color: 255; 100; 100
+
+    - Class: rviz_default_plugins/Range
+      Name: Ultrasonic Left
+      Enabled: true
+      Topic:
+        Value: /ultrasonic/left
+      Color: 100; 255; 100
+
+    - Class: rviz_default_plugins/Range
+      Name: Ultrasonic Right
+      Enabled: true
+      Topic:
+        Value: /ultrasonic/right
+      Color: 100; 100; 255
+
+    - Class: rviz_default_plugins/Range
+      Name: Ultrasonic Back
+      Enabled: true
+      Topic:
+        Value: /ultrasonic/back
+      Color: 255; 255; 100
+
+  Global Options:
+    Fixed Frame: base_link
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/Measure
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 5
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 0
+      Name: Current View
+      Pitch: 0.5
+      Target Frame: <Fixed Frame>
+      Yaw: 0.785
+Window Geometry:
+  Height: 800
+  Width: 1200
