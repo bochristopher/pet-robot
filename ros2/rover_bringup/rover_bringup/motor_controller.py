@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Motor Controller Node - Mecanum/Holonomic Drive
-With velocity timeout safety feature.
+With velocity timeout and ultrasonic filtering.
 """
 
 import rclpy
@@ -11,6 +11,43 @@ from std_msgs.msg import Int32MultiArray
 from sensor_msgs.msg import Range
 import serial
 import time
+from collections import deque
+import statistics
+
+
+class UltrasonicFilter:
+    """Filter ultrasonic readings - remove outliers and average."""
+    
+    def __init__(self, window_size=5, outlier_threshold=2.0):
+        self.window_size = window_size
+        self.outlier_threshold = outlier_threshold  # std devs from median
+        self.buffer = deque(maxlen=window_size)
+    
+    def add_reading(self, value):
+        """Add a new reading and return filtered value."""
+        if value < 0:  # Invalid reading
+            return None
+        
+        self.buffer.append(value)
+        
+        if len(self.buffer) < 3:
+            return value  # Not enough data to filter
+        
+        # Get median
+        median = statistics.median(self.buffer)
+        
+        # Filter outliers (values too far from median)
+        valid_readings = []
+        for reading in self.buffer:
+            # Allow readings within 30% of median or within 20cm
+            if abs(reading - median) <= max(median * 0.3, 20):
+                valid_readings.append(reading)
+        
+        if not valid_readings:
+            return median  # Fallback to median if all filtered
+        
+        # Return average of valid readings
+        return sum(valid_readings) / len(valid_readings)
 
 
 class MotorController(Node):
@@ -22,8 +59,9 @@ class MotorController(Node):
         self.declare_parameter("max_linear", 0.5)
         self.declare_parameter("max_angular", 2.0)
         self.declare_parameter("max_pwm", 180)
-        self.declare_parameter("cmd_timeout", 0.5)  # Stop if no cmd for 0.5s
+        self.declare_parameter("cmd_timeout", 0.5)
         self.declare_parameter("ultrasonic_sensors", ["front_left", "front_right", "back_center"])
+        self.declare_parameter("ultrasonic_filter_size", 5)
 
         self.serial_port = self.get_parameter("serial_port").value
         self.baud_rate = self.get_parameter("baud_rate").value
@@ -32,12 +70,18 @@ class MotorController(Node):
         self.max_pwm = self.get_parameter("max_pwm").value
         self.cmd_timeout = self.get_parameter("cmd_timeout").value
         self.ultrasonic_names = self.get_parameter("ultrasonic_sensors").value
+        filter_size = self.get_parameter("ultrasonic_filter_size").value
 
         self.serial = None
         self.connect_serial()
 
         self.last_cmd_time = time.time()
         self.is_moving = False
+
+        # Create ultrasonic filters
+        self.ultrasonic_filters = {}
+        for name in self.ultrasonic_names:
+            self.ultrasonic_filters[name] = UltrasonicFilter(window_size=filter_size)
 
         self.cmd_vel_sub = self.create_subscription(
             Twist, "cmd_vel", self.cmd_vel_callback, 10
@@ -55,7 +99,7 @@ class MotorController(Node):
         self.create_timer(0.05, self.timer_callback)
 
         self.get_logger().info(f"Mecanum motor controller started on {self.serial_port}")
-        self.get_logger().info(f"Velocity timeout: {self.cmd_timeout}s")
+        self.get_logger().info(f"Ultrasonic filtering: window={filter_size}, outlier removal enabled")
 
     def connect_serial(self):
         try:
@@ -77,14 +121,13 @@ class MotorController(Node):
         self.last_cmd_time = time.time()
 
         vx = msg.linear.x / self.max_linear
-        vy = -msg.linear.y / self.max_linear  # Inverted for correct strafe
+        vy = -msg.linear.y / self.max_linear
         wz = msg.angular.z / self.max_angular
 
         vx = max(-1.0, min(1.0, vx))
         vy = max(-1.0, min(1.0, vy))
         wz = max(-1.0, min(1.0, wz))
 
-        # Mecanum kinematics
         lf = vx + vy + wz
         rf = vx - vy - wz
         lr = vx - vy + wz
@@ -114,7 +157,6 @@ class MotorController(Node):
         if self.serial is None:
             return
 
-        # Check for velocity timeout
         if self.is_moving and (time.time() - self.last_cmd_time) > self.cmd_timeout:
             self.get_logger().info("Velocity timeout - stopping motors")
             try:
@@ -123,7 +165,6 @@ class MotorController(Node):
             except serial.SerialException:
                 pass
 
-        # Read sensors
         try:
             if self.read_state == 0:
                 self.serial.write(b"ENCODER\n")
@@ -157,11 +198,19 @@ class MotorController(Node):
             try:
                 parts = line[3:].split(",")
                 if len(parts) >= 3:
-                    distances = [float(p) for p in parts]
+                    raw_distances = [float(p) for p in parts]
                     now = self.get_clock().now().to_msg()
 
                     for i, name in enumerate(self.ultrasonic_names):
-                        if i < len(distances):
+                        if i < len(raw_distances):
+                            raw_cm = raw_distances[i]
+                            
+                            # Apply filter
+                            filtered_cm = self.ultrasonic_filters[name].add_reading(raw_cm)
+                            
+                            if filtered_cm is None:
+                                continue
+                            
                             msg = Range()
                             msg.header.stamp = now
                             msg.header.frame_id = f"ultrasonic_{name}_link"
@@ -169,12 +218,7 @@ class MotorController(Node):
                             msg.field_of_view = 0.26
                             msg.min_range = 0.02
                             msg.max_range = 4.0
-
-                            dist_cm = distances[i]
-                            if dist_cm < 0:
-                                msg.range = float("inf")
-                            else:
-                                msg.range = dist_cm / 100.0
+                            msg.range = filtered_cm / 100.0  # Convert to meters
 
                             self.ultrasonic_pubs[name].publish(msg)
             except ValueError:
