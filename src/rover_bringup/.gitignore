@@ -6,7 +6,6 @@ log/
 # Python
 __pycache__/
 *.py[cod]
-*.pyc
 *.egg-info/
 .eggs/
 
