@@ -22,8 +22,8 @@ echo "Starting LIDAR filter..."
 ros2 run rover_bringup lidar_filter &
 sleep 1
 
-echo "Starting camera..."
-ros2 run rover_bringup camera_node &
+echo "Starting OAK-1 camera..."
+/home/bo/.local/bin/oak_camera_node &
 sleep 2
 
 echo "Starting IMU..."

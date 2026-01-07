@@ -26,6 +26,7 @@ setup(
             "motor_controller = rover_bringup.motor_controller:main",
             "imu_node = rover_bringup.imu_node:main",
             "camera_node = rover_bringup.camera_node:main",
+            "oak_camera_node = rover_bringup.oak_camera_node:main",
             "object_detector = rover_bringup.object_detector:main",
             "lidar_filter = rover_bringup.lidar_filter:main",
         ],
