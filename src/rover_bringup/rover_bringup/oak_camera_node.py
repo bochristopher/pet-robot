@@ -1,409 +1,364 @@
 #!/usr/bin/env python3
 """
-OAK-D Lite Camera Node using DepthAI 2.x
-- RGB camera with flip correction
-- Stereo depth with proper OAK-D Lite settings
-- On-device MobileNet-SSD object detection (Myriad X VPU)
+OAK-D Lite Depth Node - Nav2 Optimized
+DepthAI 2.x compatible
+
+Stripped down for autonomous navigation:
+- Stereo depth only (no RGB, no neural network)
+- High-performance point cloud for Nav2 costmap
+- Target: 25-30+ fps
 """
 
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import Image, CompressedImage, CameraInfo
-from vision_msgs.msg import Detection2DArray, Detection2D, ObjectHypothesisWithPose
-from std_msgs.msg import Header
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
+from sensor_msgs.msg import Image, PointCloud2, PointField, CameraInfo
+from geometry_msgs.msg import TransformStamped
 from cv_bridge import CvBridge
+from tf2_ros import StaticTransformBroadcaster
 import depthai as dai
-import cv2
 import numpy as np
-from pathlib import Path
-import urllib.request
+import time
 
 
-# MobileNet-SSD labels
-LABELS = [
-    "background", "aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat",
-    "chair", "cow", "diningtable", "dog", "horse", "motorbike", "person", "pottedplant",
-    "sheep", "sofa", "train", "tvmonitor"
-]
-
-
-class OakCameraNode(Node):
+class OakDepthNode(Node):
     def __init__(self):
-        super().__init__('oak_camera_node')
+        super().__init__('oak_depth_node')
 
-        # Parameters
-        self.declare_parameter('width', 640)
-        self.declare_parameter('height', 480)
-        self.declare_parameter('fps', 30)
-        self.declare_parameter('frame_id', 'camera_link')
-        self.declare_parameter('depth_frame_id', 'camera_depth_link')
-        self.declare_parameter('publish_compressed', True)
-        self.declare_parameter('jpeg_quality', 80)
+        # ===== Parameters =====
+        self.declare_parameter('point_cloud_decimation', 4)
+        self.declare_parameter('min_depth_mm', 200)
+        self.declare_parameter('max_depth_mm', 4000)
+        self.declare_parameter('publish_depth_image', False)
+        self.declare_parameter('target_fps', 30)
+        self.declare_parameter('width', 416)
+        self.declare_parameter('height', 240)
         self.declare_parameter('flip_image', True)
-        self.declare_parameter('enable_depth', True)
-        self.declare_parameter('enable_detection', True)  # On-device NN
-        self.declare_parameter('detection_threshold', 0.5)
-        self.declare_parameter('max_depth_mm', 8000)  # 8 meters max
+        self.declare_parameter('frame_id', 'camera_link')
+        self.declare_parameter('depth_optical_frame', 'camera_depth_optical_frame')
 
+        self.decimation = self.get_parameter('point_cloud_decimation').value
+        self.min_depth_mm = self.get_parameter('min_depth_mm').value
+        self.max_depth_mm = self.get_parameter('max_depth_mm').value
+        self.publish_depth_image = self.get_parameter('publish_depth_image').value
+        self.target_fps = self.get_parameter('target_fps').value
         self.width = self.get_parameter('width').value
         self.height = self.get_parameter('height').value
-        self.fps = self.get_parameter('fps').value
-        self.frame_id = self.get_parameter('frame_id').value
-        self.depth_frame_id = self.get_parameter('depth_frame_id').value
-        self.publish_compressed = self.get_parameter('publish_compressed').value
-        self.jpeg_quality = self.get_parameter('jpeg_quality').value
         self.flip_image = self.get_parameter('flip_image').value
-        self.enable_depth = self.get_parameter('enable_depth').value
-        self.enable_detection = self.get_parameter('enable_detection').value
-        self.detection_threshold = self.get_parameter('detection_threshold').value
-        self.max_depth_mm = self.get_parameter('max_depth_mm').value
+        self.frame_id = self.get_parameter('frame_id').value
+        self.depth_optical_frame = self.get_parameter('depth_optical_frame').value
 
-        # Publishers
-        self.bridge = CvBridge()
-        self.image_pub = self.create_publisher(Image, '/camera/image_raw', 10)
-        self.camera_info_pub = self.create_publisher(CameraInfo, '/camera/camera_info', 10)
+        # ===== QoS for Nav2 =====
+        sensor_qos = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.VOLATILE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1
+        )
 
-        if self.publish_compressed:
-            self.compressed_pub = self.create_publisher(
-                CompressedImage, '/camera/image_raw/compressed', 10)
+        # ===== Publishers =====
+        self.pointcloud_pub = self.create_publisher(
+            PointCloud2, '/camera/points', sensor_qos)
 
-        if self.enable_depth:
-            self.depth_pub = self.create_publisher(Image, '/camera/depth/image_raw', 10)
-            self.depth_colored_pub = self.create_publisher(
-                CompressedImage, '/camera/depth/image_colored/compressed', 10)
+        if self.publish_depth_image:
+            self.depth_pub = self.create_publisher(
+                Image, '/camera/depth/image_raw', sensor_qos)
+            self.depth_info_pub = self.create_publisher(
+                CameraInfo, '/camera/depth/camera_info', sensor_qos)
+            self.bridge = CvBridge()
 
-        if self.enable_detection:
-            self.detection_pub = self.create_publisher(Detection2DArray, '/camera/detections', 10)
-            self.detection_image_pub = self.create_publisher(
-                CompressedImage, '/camera/detections/image/compressed', 10)
+        # ===== TF Broadcaster =====
+        self.tf_broadcaster = StaticTransformBroadcaster(self)
+        self._publish_static_transforms()
 
-        # DepthAI
+        # ===== Camera intrinsics (will be updated from device) =====
+        self.fx = self.fy = 200.0  # Will be updated
+        self.cx = self.width / 2
+        self.cy = self.height / 2
+
+        # ===== Precompute pixel coordinate grids for point cloud =====
+        self._precompute_grids()
+
+        # ===== DepthAI =====
         self.device = None
-        self.rgb_queue = None
         self.depth_queue = None
-        self.detection_queue = None
-        self.camera_info_msg = None
+        self.last_frame_time = time.time()
+        self.frame_count = 0
+        self.fps_report_interval = 100
 
         try:
-            self._setup_pipeline()
+            self._setup_and_start()
         except Exception as e:
             self.get_logger().error(f'Failed to initialize OAK camera: {e}')
             import traceback
             traceback.print_exc()
             return
 
-        self.create_timer(1.0 / self.fps, self.capture_and_publish)
+        # Main loop - run as fast as possible
+        self.create_timer(1.0 / (self.target_fps + 10), self.process_depth)
 
-    def _download_model(self):
-        """Download MobileNet-SSD blob for Myriad X."""
-        model_dir = Path.home() / '.cache' / 'depthai_models'
-        model_dir.mkdir(parents=True, exist_ok=True)
-        model_path = model_dir / 'mobilenet-ssd_openvino_2021.4_6shave.blob'
+        # Watchdog
+        self.create_timer(10.0, self._check_connection)
 
-        if not model_path.exists():
-            self.get_logger().info('Downloading MobileNet-SSD model for Myriad X...')
-            url = 'https://artifacts.luxonis.com/artifactory/luxonis-depthai-data-local/network/mobilenet-ssd_openvino_2021.4_6shave.blob'
-            urllib.request.urlretrieve(url, model_path)
-            self.get_logger().info('Model downloaded!')
+    def _precompute_grids(self):
+        """Precompute pixel coordinate grids for fast point cloud generation."""
+        dec = self.decimation
+        h, w = self.height, self.width
 
-        return str(model_path)
+        # Decimated dimensions
+        self.h_dec = h // dec
+        self.w_dec = w // dec
 
-    def _setup_pipeline(self):
-        """Set up DepthAI pipeline."""
+        # Create meshgrid of pixel coordinates (decimated)
+        u = np.arange(0, w, dec, dtype=np.float32)
+        v = np.arange(0, h, dec, dtype=np.float32)
+        self.u_grid, self.v_grid = np.meshgrid(u, v)
+
+    def _update_intrinsics_grid(self):
+        """Update the precomputed grids with actual camera intrinsics."""
+        # Normalized coordinates for 3D projection
+        self.x_factor = (self.u_grid - self.cx) / self.fx
+        self.y_factor = (self.v_grid - self.cy) / self.fy
+
+    def _publish_static_transforms(self):
+        """Publish static TF frames for camera."""
+        transforms = []
+        now = self.get_clock().now().to_msg()
+
+        # camera_link -> camera_depth_optical_frame
+        # Optical frame: Z forward, X right, Y down
+        t = TransformStamped()
+        t.header.stamp = now
+        t.header.frame_id = self.frame_id
+        t.child_frame_id = self.depth_optical_frame
+        t.transform.translation.x = 0.0
+        t.transform.translation.y = 0.0
+        t.transform.translation.z = 0.0
+        # Rotation from ROS convention (X forward) to optical (Z forward)
+        t.transform.rotation.x = -0.5
+        t.transform.rotation.y = 0.5
+        t.transform.rotation.z = -0.5
+        t.transform.rotation.w = 0.5
+        transforms.append(t)
+
+        self.tf_broadcaster.sendTransform(transforms)
+        self.get_logger().info(f'Published TF: {self.frame_id} -> {self.depth_optical_frame}')
+
+    def _setup_and_start(self):
+        """Set up DepthAI pipeline and start device."""
         pipeline = dai.Pipeline()
 
-        # ===== RGB Camera =====
-        cam_rgb = pipeline.create(dai.node.ColorCamera)
-        cam_rgb.setPreviewSize(self.width, self.height)
-        cam_rgb.setInterleaved(False)
-        cam_rgb.setColorOrder(dai.ColorCameraProperties.ColorOrder.BGR)
-        cam_rgb.setFps(self.fps)
-        cam_rgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P)
+        # ===== Mono Cameras =====
+        mono_left = pipeline.create(dai.node.MonoCamera)
+        mono_right = pipeline.create(dai.node.MonoCamera)
 
-        # RGB output
-        xout_rgb = pipeline.create(dai.node.XLinkOut)
-        xout_rgb.setStreamName("rgb")
-        cam_rgb.preview.link(xout_rgb.input)
+        # Use 400P for speed (400x640 -> we'll output at configured resolution)
+        mono_left.setResolution(dai.MonoCameraProperties.SensorResolution.THE_400_P)
+        mono_left.setCamera("left")
+        mono_left.setFps(self.target_fps)
+
+        mono_right.setResolution(dai.MonoCameraProperties.SensorResolution.THE_400_P)
+        mono_right.setCamera("right")
+        mono_right.setFps(self.target_fps)
 
         # ===== Stereo Depth =====
-        if self.enable_depth:
-            mono_left = pipeline.create(dai.node.MonoCamera)
-            mono_right = pipeline.create(dai.node.MonoCamera)
-            stereo = pipeline.create(dai.node.StereoDepth)
+        stereo = pipeline.create(dai.node.StereoDepth)
 
-            # OAK-D Lite uses 480P mono cameras
-            mono_left.setResolution(dai.MonoCameraProperties.SensorResolution.THE_480_P)
-            mono_left.setCamera("left")
-            mono_left.setFps(self.fps)
+        # Performance-optimized settings
+        stereo.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.HIGH_DENSITY)
+        stereo.setDepthAlign(dai.CameraBoardSocket.CAM_A)
+        stereo.setSubpixel(False)  # Faster
+        stereo.setLeftRightCheck(True)  # Filter bad matches
+        stereo.setExtendedDisparity(False)
+        stereo.initialConfig.setMedianFilter(dai.MedianFilter.KERNEL_5x5)
+        stereo.setOutputSize(self.width, self.height)
 
-            mono_right.setResolution(dai.MonoCameraProperties.SensorResolution.THE_480_P)
-            mono_right.setCamera("right")
-            mono_right.setFps(self.fps)
+        # Post-processing (minimal for speed)
+        config = stereo.initialConfig.get()
+        config.postProcessing.speckleFilter.enable = True
+        config.postProcessing.speckleFilter.speckleRange = 50
+        config.postProcessing.temporalFilter.enable = True
+        config.postProcessing.temporalFilter.alpha = 0.4
+        config.postProcessing.spatialFilter.enable = False  # Skip for speed
+        config.postProcessing.thresholdFilter.minRange = self.min_depth_mm
+        config.postProcessing.thresholdFilter.maxRange = self.max_depth_mm
+        stereo.initialConfig.set(config)
 
-            # Stereo settings optimized for OAK-D Lite
-            stereo.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.HIGH_DENSITY)
-            stereo.initialConfig.setMedianFilter(dai.MedianFilter.KERNEL_7x7)
-            stereo.setLeftRightCheck(True)
-            stereo.setExtendedDisparity(True)  # Better for close range
-            stereo.setSubpixel(False)  # Faster
-            stereo.setDepthAlign(dai.CameraBoardSocket.CAM_A)
+        # Link mono to stereo
+        mono_left.out.link(stereo.left)
+        mono_right.out.link(stereo.right)
 
-            # Configure depth output
-            config = stereo.initialConfig.get()
-            config.postProcessing.speckleFilter.enable = True
-            config.postProcessing.speckleFilter.speckleRange = 50
-            config.postProcessing.temporalFilter.enable = True
-            config.postProcessing.spatialFilter.enable = True
-            config.postProcessing.spatialFilter.holeFillingRadius = 2
-            config.postProcessing.spatialFilter.numIterations = 1
-            config.postProcessing.thresholdFilter.minRange = 100   # 10cm min
-            config.postProcessing.thresholdFilter.maxRange = self.max_depth_mm
-            stereo.initialConfig.set(config)
-
-            mono_left.out.link(stereo.left)
-            mono_right.out.link(stereo.right)
-
-            xout_depth = pipeline.create(dai.node.XLinkOut)
-            xout_depth.setStreamName("depth")
-            stereo.depth.link(xout_depth.input)
-
-        # ===== Neural Network (On-Device Object Detection) =====
-        if self.enable_detection:
-            model_path = self._download_model()
-
-            detection_nn = pipeline.create(dai.node.MobileNetDetectionNetwork)
-            detection_nn.setConfidenceThreshold(self.detection_threshold)
-            detection_nn.setBlobPath(model_path)
-            detection_nn.setNumInferenceThreads(2)
-            detection_nn.input.setBlocking(False)
-
-            # Need to resize for NN (300x300)
-            manip = pipeline.create(dai.node.ImageManip)
-            manip.initialConfig.setResize(300, 300)
-            manip.initialConfig.setFrameType(dai.ImgFrame.Type.BGR888p)
-            cam_rgb.preview.link(manip.inputImage)
-            manip.out.link(detection_nn.input)
-
-            xout_nn = pipeline.create(dai.node.XLinkOut)
-            xout_nn.setStreamName("detections")
-            detection_nn.out.link(xout_nn.input)
+        # Depth output
+        xout_depth = pipeline.create(dai.node.XLinkOut)
+        xout_depth.setStreamName("depth")
+        stereo.depth.link(xout_depth.input)
 
         # Start device
         self.device = dai.Device(pipeline)
-        self.rgb_queue = self.device.getOutputQueue(name="rgb", maxSize=4, blocking=False)
+        self.depth_queue = self.device.getOutputQueue(
+            name="depth", maxSize=2, blocking=False)
 
-        if self.enable_depth:
-            self.depth_queue = self.device.getOutputQueue(name="depth", maxSize=4, blocking=False)
-
-        if self.enable_detection:
-            self.detection_queue = self.device.getOutputQueue(name="detections", maxSize=4, blocking=False)
-
+        # Get camera calibration
         self._setup_camera_info()
 
-        features = ["RGB"]
-        if self.enable_depth:
-            features.append("Stereo Depth")
-        if self.enable_detection:
-            features.append("MobileNet-SSD (Myriad X)")
-        if self.flip_image:
-            features.append("flipped 180°")
-
         self.get_logger().info(
-            f'OAK camera opened: {self.device.getDeviceName()} @ {self.width}x{self.height} '
-            f'{self.fps}fps [{" + ".join(features)}]'
+            f'OAK-D Lite started: {self.width}x{self.height} @ {self.target_fps}fps | '
+            f'Decimation: {self.decimation}x ({self.w_dec}x{self.h_dec} points) | '
+            f'Range: {self.min_depth_mm/1000:.1f}-{self.max_depth_mm/1000:.1f}m'
         )
 
     def _setup_camera_info(self):
-        """Get camera calibration."""
+        """Get camera intrinsics from device calibration."""
         try:
             calib = self.device.readCalibration()
-            intrinsics = calib.getCameraIntrinsics(dai.CameraBoardSocket.CAM_A, self.width, self.height)
+            # Get intrinsics for the depth output resolution
+            intrinsics = calib.getCameraIntrinsics(
+                dai.CameraBoardSocket.CAM_A, self.width, self.height)
 
-            self.camera_info_msg = CameraInfo()
-            self.camera_info_msg.header.frame_id = self.frame_id
-            self.camera_info_msg.width = self.width
-            self.camera_info_msg.height = self.height
-            self.camera_info_msg.distortion_model = 'plumb_bob'
+            self.fx = intrinsics[0][0]
+            self.fy = intrinsics[1][1]
+            self.cx = intrinsics[0][2]
+            self.cy = intrinsics[1][2]
 
-            fx, fy = intrinsics[0][0], intrinsics[1][1]
-            cx, cy = intrinsics[0][2], intrinsics[1][2]
-            self.camera_info_msg.k = [fx, 0.0, cx, 0.0, fy, cy, 0.0, 0.0, 1.0]
-            self.camera_info_msg.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
-            self.camera_info_msg.p = [fx, 0.0, cx, 0.0, 0.0, fy, cy, 0.0, 0.0, 0.0, 1.0, 0.0]
-            self.camera_info_msg.d = [0.0] * 5
+            self.get_logger().info(
+                f'Camera intrinsics: fx={self.fx:.1f} fy={self.fy:.1f} '
+                f'cx={self.cx:.1f} cy={self.cy:.1f}'
+            )
+
+            # Update precomputed grids with actual intrinsics
+            self._update_intrinsics_grid()
+
+            # Store for CameraInfo message
+            if self.publish_depth_image:
+                self.camera_info_msg = CameraInfo()
+                self.camera_info_msg.width = self.width
+                self.camera_info_msg.height = self.height
+                self.camera_info_msg.distortion_model = 'plumb_bob'
+                self.camera_info_msg.k = [
+                    self.fx, 0.0, self.cx,
+                    0.0, self.fy, self.cy,
+                    0.0, 0.0, 1.0
+                ]
+                self.camera_info_msg.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+                self.camera_info_msg.p = [
+                    self.fx, 0.0, self.cx, 0.0,
+                    0.0, self.fy, self.cy, 0.0,
+                    0.0, 0.0, 1.0, 0.0
+                ]
+                self.camera_info_msg.d = [0.0] * 5
 
         except Exception as e:
-            self.get_logger().warn(f'Could not get calibration: {e}')
+            self.get_logger().warn(f'Could not get calibration: {e}, using defaults')
+            self._update_intrinsics_grid()
 
-    def capture_and_publish(self):
+    def _check_connection(self):
+        """Watchdog to detect camera disconnection."""
+        if time.time() - self.last_frame_time > 10.0:
+            self.get_logger().warn('No depth frames for 10s, camera may be disconnected')
+
+    def process_depth(self):
+        """Process depth frame and publish point cloud."""
+        if self.depth_queue is None:
+            return
+
+        depth_data = self.depth_queue.tryGet()
+        if depth_data is None:
+            return
+
+        depth_frame = depth_data.getFrame()
+        self.last_frame_time = time.time()
+
+        # Flip if camera is mounted upside down
+        if self.flip_image:
+            depth_frame = np.rot90(depth_frame, 2)
+
         now = self.get_clock().now().to_msg()
-        frame = None
-        detections = None
 
-        # RGB
-        if self.rgb_queue:
-            rgb_data = self.rgb_queue.tryGet()
-            if rgb_data is not None:
-                frame = rgb_data.getCvFrame()
-                if self.flip_image:
-                    frame = cv2.rotate(frame, cv2.ROTATE_180)
-                self._publish_rgb(frame, now)
+        # Publish point cloud (always)
+        self._publish_pointcloud(depth_frame, now)
 
-        # Detections (from Myriad X)
-        if self.enable_detection and self.detection_queue:
-            det_data = self.detection_queue.tryGet()
-            if det_data is not None:
-                detections = det_data.detections
-                self._publish_detections(detections, frame, now)
+        # Publish depth image (optional, for debugging)
+        if self.publish_depth_image:
+            self._publish_depth_image(depth_frame, now)
 
-        # Depth
-        if self.enable_depth and self.depth_queue:
-            depth_data = self.depth_queue.tryGet()
-            if depth_data is not None:
-                depth_frame = depth_data.getFrame()
-                if self.flip_image:
-                    depth_frame = cv2.rotate(depth_frame, cv2.ROTATE_180)
-                self._publish_depth(depth_frame, now)
+        # FPS reporting
+        self.frame_count += 1
+        if self.frame_count % self.fps_report_interval == 0:
+            elapsed = time.time() - self.last_frame_time + 0.001
+            # This isn't quite right but gives rough idea
+            self.get_logger().info(f'Processed {self.frame_count} frames')
 
-    def _publish_rgb(self, frame, stamp):
-        try:
-            img_msg = self.bridge.cv2_to_imgmsg(frame, encoding='bgr8')
-            img_msg.header.stamp = stamp
-            img_msg.header.frame_id = self.frame_id
-            self.image_pub.publish(img_msg)
+    def _publish_pointcloud(self, depth_frame, stamp):
+        """Publish decimated point cloud for Nav2."""
+        dec = self.decimation
 
-            if self.camera_info_msg:
-                self.camera_info_msg.header.stamp = stamp
-                self.camera_info_pub.publish(self.camera_info_msg)
+        # Decimate depth frame
+        depth_dec = depth_frame[::dec, ::dec].astype(np.float32)
 
-            if self.publish_compressed:
-                compressed_msg = CompressedImage()
-                compressed_msg.header.stamp = stamp
-                compressed_msg.header.frame_id = self.frame_id
-                compressed_msg.format = 'jpeg'
-                _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality])
-                compressed_msg.data = jpeg.tobytes()
-                self.compressed_pub.publish(compressed_msg)
-        except Exception as e:
-            self.get_logger().error(f'RGB publish error: {e}')
+        # Convert depth from mm to meters
+        z = depth_dec / 1000.0
 
-    def _publish_depth(self, depth_frame, stamp):
-        try:
-            # Raw depth (16UC1 in mm)
-            depth_msg = self.bridge.cv2_to_imgmsg(depth_frame.astype(np.uint16), encoding='16UC1')
-            depth_msg.header.stamp = stamp
-            depth_msg.header.frame_id = self.depth_frame_id
-            self.depth_pub.publish(depth_msg)
+        # Valid depth mask (within range)
+        min_z = self.min_depth_mm / 1000.0
+        max_z = self.max_depth_mm / 1000.0
+        valid = (z > min_z) & (z < max_z)
 
-            # Colorized depth - normalize to valid range only
-            depth_valid = depth_frame.copy().astype(np.float32)
-            depth_valid[depth_valid == 0] = np.nan  # Mark invalid as NaN
+        # Calculate 3D coordinates using precomputed grids
+        x = self.x_factor * z
+        y = self.y_factor * z
 
-            # Get actual min/max for better visualization
-            valid_mask = ~np.isnan(depth_valid)
-            if np.any(valid_mask):
-                min_val = np.nanmin(depth_valid)
-                max_val = np.nanpercentile(depth_valid[valid_mask], 95)  # Use 95th percentile
-                max_val = max(max_val, min_val + 100)  # Ensure range
+        # Stack into Nx3 array and filter valid points
+        points = np.stack([x, y, z], axis=-1)
+        points = points[valid]
 
-                # Normalize
-                depth_norm = (depth_valid - min_val) / (max_val - min_val)
-                depth_norm = np.clip(depth_norm, 0, 1)
-                depth_norm = np.nan_to_num(depth_norm, nan=0.0)
-                depth_norm = (depth_norm * 255).astype(np.uint8)
-                depth_norm[~valid_mask] = 0
+        if len(points) == 0:
+            return
 
-                # Apply colormap (TURBO is better than JET)
-                depth_colored = cv2.applyColorMap(depth_norm, cv2.COLORMAP_TURBO)
-                depth_colored[~valid_mask] = [0, 0, 0]  # Black for invalid
-            else:
-                depth_colored = np.zeros((depth_frame.shape[0], depth_frame.shape[1], 3), dtype=np.uint8)
+        # Create PointCloud2 message
+        msg = PointCloud2()
+        msg.header.stamp = stamp
+        msg.header.frame_id = self.depth_optical_frame
+        msg.height = 1
+        msg.width = len(points)
+        msg.is_dense = True
+        msg.is_bigendian = False
 
-            colored_msg = CompressedImage()
-            colored_msg.header.stamp = stamp
-            colored_msg.header.frame_id = self.depth_frame_id
-            colored_msg.format = 'jpeg'
-            _, jpeg = cv2.imencode('.jpg', depth_colored, [cv2.IMWRITE_JPEG_QUALITY, 80])
-            colored_msg.data = jpeg.tobytes()
-            self.depth_colored_pub.publish(colored_msg)
+        # XYZ fields only (12 bytes per point)
+        msg.fields = [
+            PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
+            PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
+            PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1),
+        ]
+        msg.point_step = 12
+        msg.row_step = msg.point_step * len(points)
+        msg.data = points.astype(np.float32).tobytes()
 
-        except Exception as e:
-            self.get_logger().debug(f'Depth publish error: {e}')
+        self.pointcloud_pub.publish(msg)
 
-    def _publish_detections(self, detections, frame, stamp):
-        """Publish detections from on-device neural network."""
-        try:
-            det_array = Detection2DArray()
-            det_array.header.stamp = stamp
-            det_array.header.frame_id = self.frame_id
+    def _publish_depth_image(self, depth_frame, stamp):
+        """Publish depth image for debugging."""
+        depth_msg = self.bridge.cv2_to_imgmsg(
+            depth_frame.astype(np.uint16), encoding='16UC1')
+        depth_msg.header.stamp = stamp
+        depth_msg.header.frame_id = self.depth_optical_frame
+        self.depth_pub.publish(depth_msg)
 
-            vis_frame = frame.copy() if frame is not None else None
-
-            for det in detections:
-                # Flip bounding box if image is flipped
-                if self.flip_image:
-                    x1 = 1.0 - det.xmax
-                    x2 = 1.0 - det.xmin
-                    y1 = 1.0 - det.ymax
-                    y2 = 1.0 - det.ymin
-                else:
-                    x1, x2 = det.xmin, det.xmax
-                    y1, y2 = det.ymin, det.ymax
-
-                # Create Detection2D message
-                detection_msg = Detection2D()
-                detection_msg.header = det_array.header
-
-                # Bounding box (center + size)
-                detection_msg.bbox.center.position.x = (x1 + x2) / 2.0 * self.width
-                detection_msg.bbox.center.position.y = (y1 + y2) / 2.0 * self.height
-                detection_msg.bbox.size_x = (x2 - x1) * self.width
-                detection_msg.bbox.size_y = (y2 - y1) * self.height
-
-                # Hypothesis
-                hyp = ObjectHypothesisWithPose()
-                hyp.hypothesis.class_id = LABELS[det.label] if det.label < len(LABELS) else str(det.label)
-                hyp.hypothesis.score = det.confidence
-                detection_msg.results.append(hyp)
-
-                det_array.detections.append(detection_msg)
-
-                # Draw on visualization frame
-                if vis_frame is not None:
-                    px1, py1 = int(x1 * self.width), int(y1 * self.height)
-                    px2, py2 = int(x2 * self.width), int(y2 * self.height)
-                    label = LABELS[det.label] if det.label < len(LABELS) else f"class_{det.label}"
-                    color = (0, 255, 0) if label == "person" else (255, 128, 0)
-
-                    cv2.rectangle(vis_frame, (px1, py1), (px2, py2), color, 2)
-                    text = f"{label}: {det.confidence:.0%}"
-                    cv2.putText(vis_frame, text, (px1, py1 - 5),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-
-            self.detection_pub.publish(det_array)
-
-            # Publish visualization
-            if vis_frame is not None:
-                vis_msg = CompressedImage()
-                vis_msg.header.stamp = stamp
-                vis_msg.header.frame_id = self.frame_id
-                vis_msg.format = 'jpeg'
-                _, jpeg = cv2.imencode('.jpg', vis_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-                vis_msg.data = jpeg.tobytes()
-                self.detection_image_pub.publish(vis_msg)
-
-        except Exception as e:
-            self.get_logger().debug(f'Detection publish error: {e}')
+        # Camera info
+        self.camera_info_msg.header.stamp = stamp
+        self.camera_info_msg.header.frame_id = self.depth_optical_frame
+        self.depth_info_pub.publish(self.camera_info_msg)
 
     def destroy_node(self):
+        """Clean shutdown."""
         if self.device:
             self.device.close()
+            self.get_logger().info('OAK camera closed')
         super().destroy_node()
 
 
 def main(args=None):
     rclpy.init(args=args)
-    node = OakCameraNode()
+    node = OakDepthNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
