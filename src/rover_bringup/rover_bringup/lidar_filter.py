@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
 LIDAR Filter Node - Cleans up LaserScan data
+
+Applies temporal median filtering and spatial noise removal to reduce
+spurious readings from RPLidar. Handles variable-length scans gracefully.
 """
 
 import rclpy
@@ -26,8 +29,9 @@ class LidarFilter(Node):
         self.neighbor_threshold = self.get_parameter("neighbor_threshold").value
         self.min_neighbors = self.get_parameter("min_neighbors").value
         
+        # Store (length, ranges) tuples to track lengths
         self.scan_buffer = deque(maxlen=self.window_size)
-        self.expected_length = None
+        self.scan_count = 0
 
         self.scan_sub = self.create_subscription(
             LaserScan, "/scan", self.scan_callback, 10
@@ -37,29 +41,40 @@ class LidarFilter(Node):
             LaserScan, "/scan_filtered", 10
         )
         
-        self.get_logger().info("LIDAR filter started")
+        self.get_logger().info(
+            f"LIDAR filter started (window={self.window_size}, "
+            f"range={self.min_range}-{self.max_range}m)"
+        )
 
     def scan_callback(self, msg):
         ranges = np.array(msg.ranges, dtype=np.float32)
-
-        # Clear buffer if scan length changes
-        if self.expected_length is not None and len(ranges) != self.expected_length:
-            self.scan_buffer.clear()
-        self.expected_length = len(ranges)
-
+        current_length = len(ranges)
+        
         # Replace inf/nan with max_range
         ranges = np.where(np.isfinite(ranges), ranges, self.max_range)
 
         # Clamp to valid range
         ranges = np.clip(ranges, self.min_range, self.max_range)
 
-        # Add to buffer
-        self.scan_buffer.append(ranges.copy())
+        # Add to buffer with length tracking
+        self.scan_buffer.append((current_length, ranges.copy()))
 
-        # Temporal median filter
+        # Temporal median filter - only use scans with matching length
         if len(self.scan_buffer) >= self.window_size:
-            stacked = np.stack(self.scan_buffer, axis=0)
-            ranges = np.median(stacked, axis=0)
+            # Filter buffer to only include scans matching current length
+            matching_scans = [
+                scan for length, scan in self.scan_buffer 
+                if length == current_length
+            ]
+            
+            if len(matching_scans) >= 2:
+                # Stack only matching-length arrays
+                try:
+                    stacked = np.stack(matching_scans, axis=0)
+                    ranges = np.median(stacked, axis=0)
+                except ValueError:
+                    # Fallback: shapes still don't match (shouldn't happen)
+                    pass
         
         # Remove isolated noise points
         filtered = self.remove_noise(ranges)
@@ -78,22 +93,46 @@ class LidarFilter(Node):
         out.intensities = msg.intensities
         
         self.scan_pub.publish(out)
+        
+        # Log occasional stats
+        self.scan_count += 1
+        if self.scan_count % 500 == 0:
+            self.get_logger().info(
+                f"Processed {self.scan_count} scans, current length: {current_length}"
+            )
 
     def remove_noise(self, ranges):
-        filtered = ranges.copy()
+        """Remove isolated noise points using vectorized neighbor check."""
         n = len(ranges)
+        if n == 0:
+            return ranges
+            
+        filtered = ranges.copy()
+        threshold = self.neighbor_threshold
         
-        for i in range(n):
-            if ranges[i] >= self.max_range:
+        # Vectorized approach: check neighbors within window
+        # For each point, count how many neighbors are within threshold
+        neighbor_counts = np.zeros(n, dtype=np.int32)
+        
+        for offset in range(-3, 4):
+            if offset == 0:
                 continue
+            # Shift and compare
+            shifted = np.roll(ranges, offset)
+            # Handle boundary - don't count wrapped values
+            if offset > 0:
+                shifted[:offset] = self.max_range + 1  # Make them not match
+            else:
+                shifted[offset:] = self.max_range + 1
             
-            neighbors = 0
-            for j in range(max(0, i-3), min(n, i+4)):
-                if i != j and abs(ranges[i] - ranges[j]) < self.neighbor_threshold:
-                    neighbors += 1
-            
-            if neighbors < self.min_neighbors:
-                filtered[i] = self.max_range
+            close_enough = np.abs(ranges - shifted) < threshold
+            neighbor_counts += close_enough.astype(np.int32)
+        
+        # Mark points with too few neighbors as max_range
+        # But only if they're not already at max_range
+        valid_points = ranges < self.max_range
+        isolated = (neighbor_counts < self.min_neighbors) & valid_points
+        filtered[isolated] = self.max_range
         
         return filtered
 
