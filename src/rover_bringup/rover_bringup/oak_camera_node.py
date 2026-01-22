@@ -36,6 +36,7 @@ class OakDepthNode(Node):
         self.declare_parameter('flip_image', True)
         self.declare_parameter('frame_id', 'camera_link')
         self.declare_parameter('depth_optical_frame', 'camera_depth_optical_frame')
+        self.declare_parameter('publish_rgb', True)
 
         self.decimation = self.get_parameter('point_cloud_decimation').value
         self.min_depth_mm = self.get_parameter('min_depth_mm').value
@@ -47,6 +48,7 @@ class OakDepthNode(Node):
         self.flip_image = self.get_parameter('flip_image').value
         self.frame_id = self.get_parameter('frame_id').value
         self.depth_optical_frame = self.get_parameter('depth_optical_frame').value
+        self.publish_rgb = self.get_parameter('publish_rgb').value
 
         # ===== QoS for Nav2 =====
         sensor_qos = QoSProfile(
@@ -65,7 +67,13 @@ class OakDepthNode(Node):
                 Image, '/camera/depth/image_raw', sensor_qos)
             self.depth_info_pub = self.create_publisher(
                 CameraInfo, '/camera/depth/camera_info', sensor_qos)
-            self.bridge = CvBridge()
+        
+        # RGB publisher
+        self.bridge = CvBridge()
+        if self.publish_rgb:
+            self.rgb_pub = self.create_publisher(
+                Image, '/camera/rgb/image_raw', sensor_qos)
+            self.get_logger().info('RGB camera enabled')
 
         # ===== TF Broadcaster =====
         self.tf_broadcaster = StaticTransformBroadcaster(self)
@@ -82,6 +90,7 @@ class OakDepthNode(Node):
         # ===== DepthAI =====
         self.device = None
         self.depth_queue = None
+        self.rgb_queue = None
         self.last_frame_time = time.time()
         self.frame_count = 0
         self.fps_report_interval = 100
@@ -193,10 +202,26 @@ class OakDepthNode(Node):
         xout_depth.setStreamName("depth")
         stereo.depth.link(xout_depth.input)
 
+        # ===== RGB Camera (optional) =====
+        if self.publish_rgb:
+            cam_rgb = pipeline.create(dai.node.ColorCamera)
+            cam_rgb.setPreviewSize(416, 240)
+            cam_rgb.setInterleaved(False)
+            cam_rgb.setColorOrder(dai.ColorCameraProperties.ColorOrder.RGB)
+            cam_rgb.setFps(self.target_fps)
+            
+            xout_rgb = pipeline.create(dai.node.XLinkOut)
+            xout_rgb.setStreamName("rgb")
+            cam_rgb.preview.link(xout_rgb.input)
+
         # Start device
         self.device = dai.Device(pipeline)
         self.depth_queue = self.device.getOutputQueue(
             name="depth", maxSize=2, blocking=False)
+        
+        if self.publish_rgb:
+            self.rgb_queue = self.device.getOutputQueue(
+                name="rgb", maxSize=2, blocking=False)
 
         # Get camera calibration
         self._setup_camera_info()
@@ -281,6 +306,15 @@ class OakDepthNode(Node):
         if self.publish_depth_image:
             self._publish_depth_image(depth_frame, now)
 
+        # Publish RGB image
+        if self.publish_rgb and self.rgb_queue is not None:
+            rgb_data = self.rgb_queue.tryGet()
+            if rgb_data is not None:
+                rgb_frame = rgb_data.getCvFrame()
+                if self.flip_image:
+                    rgb_frame = np.rot90(rgb_frame, 2)
+                self._publish_rgb_image(rgb_frame, now)
+
         # FPS reporting
         self.frame_count += 1
         if self.frame_count % self.fps_report_interval == 0:
@@ -347,6 +381,13 @@ class OakDepthNode(Node):
         self.camera_info_msg.header.stamp = stamp
         self.camera_info_msg.header.frame_id = self.depth_optical_frame
         self.depth_info_pub.publish(self.camera_info_msg)
+
+    def _publish_rgb_image(self, rgb_frame, stamp):
+        """Publish RGB image."""
+        rgb_msg = self.bridge.cv2_to_imgmsg(rgb_frame, encoding='rgb8')
+        rgb_msg.header.stamp = stamp
+        rgb_msg.header.frame_id = self.depth_optical_frame
+        self.rgb_pub.publish(rgb_msg)
 
     def destroy_node(self):
         """Clean shutdown."""

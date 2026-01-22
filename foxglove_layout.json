@@ -1,0 +1,163 @@
+{
+  "configById": {
+    "3D!1": {
+      "cameraState": {
+        "perspective": true,
+        "distance": 5,
+        "phi": 45,
+        "thetaOffset": 0,
+        "targetOffset": [0, 0, 0],
+        "target": [0, 0, 0],
+        "targetOrientation": [0, 0, 0, 1],
+        "fovy": 45,
+        "near": 0.01,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "followTf": "base_link",
+      "scene": {
+        "enableStats": false,
+        "backgroundColor": "#1a1a1e"
+      },
+      "transforms": {
+        "frame:base_link": { "visible": true },
+        "frame:laser": { "visible": true },
+        "frame:odom": { "visible": true },
+        "frame:map": { "visible": true }
+      },
+      "topics": {
+        "/scan_filtered": {
+          "visible": true,
+          "colorField": "intensity",
+          "colorMode": "flat",
+          "flatColor": "#00ff00",
+          "pointSize": 4
+        },
+        "/camera/points": {
+          "visible": true,
+          "colorMode": "flat",
+          "flatColor": "#00aaff",
+          "pointSize": 2
+        }
+      },
+      "layers": {
+        "grid": { "visible": true }
+      }
+    },
+    "Plot!ultrasonic": {
+      "paths": [
+        { "value": "/ultrasonic/front_left.range", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "/ultrasonic/front_right.range", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "/ultrasonic/back_center.range", "enabled": true, "timestampMethod": "receiveTime" }
+      ],
+      "xAxisVal": "timestamp",
+      "showLegend": true,
+      "legendDisplay": "floating",
+      "showPlotValuesInLegend": true,
+      "isSynced": true,
+      "title": "Ultrasonic Sensors (m)"
+    },
+    "Plot!imu_gyro": {
+      "paths": [
+        { "value": "/imu/data.angular_velocity.x", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "/imu/data.angular_velocity.y", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "/imu/data.angular_velocity.z", "enabled": true, "timestampMethod": "receiveTime" }
+      ],
+      "xAxisVal": "timestamp",
+      "showLegend": true,
+      "legendDisplay": "floating",
+      "showPlotValuesInLegend": true,
+      "title": "IMU Gyroscope (rad/s)"
+    },
+    "Plot!imu_accel": {
+      "paths": [
+        { "value": "/imu/data.linear_acceleration.x", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "/imu/data.linear_acceleration.y", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "/imu/data.linear_acceleration.z", "enabled": true, "timestampMethod": "receiveTime" }
+      ],
+      "xAxisVal": "timestamp",
+      "showLegend": true,
+      "legendDisplay": "floating",
+      "showPlotValuesInLegend": true,
+      "title": "IMU Accelerometer (m/s²)"
+    },
+    "Plot!encoders": {
+      "paths": [
+        { "value": "/wheel_encoders.data[0]", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "/wheel_encoders.data[1]", "enabled": true, "timestampMethod": "receiveTime" }
+      ],
+      "xAxisVal": "timestamp",
+      "showLegend": true,
+      "legendDisplay": "floating",
+      "showPlotValuesInLegend": true,
+      "title": "Wheel Encoders (ticks)"
+    },
+    "Plot!odom_vel": {
+      "paths": [
+        { "value": "/odom.twist.twist.linear.x", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "/odom.twist.twist.angular.z", "enabled": true, "timestampMethod": "receiveTime" }
+      ],
+      "xAxisVal": "timestamp",
+      "showLegend": true,
+      "legendDisplay": "floating",
+      "showPlotValuesInLegend": true,
+      "title": "Odometry Velocity"
+    },
+    "RawMessages!odom": {
+      "topicPath": "/odom",
+      "diffEnabled": false,
+      "diffMethod": "custom",
+      "diffTopicPath": "",
+      "showFullMessageForDiff": false,
+      "expansion": "all"
+    },
+    "RawMessages!imu": {
+      "topicPath": "/imu/data",
+      "diffEnabled": false,
+      "expansion": "all"
+    },
+    "StateTransitions!1": {
+      "paths": [
+        { "value": "/cmd_vel.linear.x", "timestampMethod": "receiveTime" }
+      ]
+    }
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "linkedGlobalVariables": [],
+  "playbackConfig": {
+    "speed": 1
+  },
+  "layout": {
+    "first": {
+      "first": "3D!1",
+      "second": {
+        "first": "Plot!ultrasonic",
+        "second": "Plot!odom_vel",
+        "direction": "column",
+        "splitPercentage": 50
+      },
+      "direction": "row",
+      "splitPercentage": 60
+    },
+    "second": {
+      "first": {
+        "first": "Plot!imu_gyro",
+        "second": "Plot!imu_accel",
+        "direction": "row",
+        "splitPercentage": 50
+      },
+      "second": {
+        "first": "Plot!encoders",
+        "second": "RawMessages!odom",
+        "direction": "row",
+        "splitPercentage": 50
+      },
+      "direction": "column",
+      "splitPercentage": 50
+    },
+    "direction": "column",
+    "splitPercentage": 60
+  }
+}
+

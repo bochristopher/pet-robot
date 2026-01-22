@@ -65,6 +65,13 @@ echo ""
 echo "Starting TF publishers..."
 # LIDAR is rotated 180° (mounted backwards)
 ros2 run tf2_ros static_transform_publisher 0 0 0.1 3.14159 0 0 base_link laser &
+# Camera: base_link -> camera_link (camera node publishes camera_link -> camera_depth_optical_frame)
+# x=0.1m forward, z=0.05m up from base_link
+ros2 run tf2_ros static_transform_publisher 0.1 0 0.05 0 0 0 base_link camera_link &
+# Ultrasonic sensors
+ros2 run tf2_ros static_transform_publisher 0.1 0.1 0.05 0 0 0.3 base_link ultrasonic_front_left_link &
+ros2 run tf2_ros static_transform_publisher 0.1 -0.1 0.05 0 0 -0.3 base_link ultrasonic_front_right_link &
+ros2 run tf2_ros static_transform_publisher -0.1 0 0.05 0 0 3.14159 base_link ultrasonic_back_center_link &
 # map -> odom (will be updated by AMCL/SLAM when available)
 ros2 run tf2_ros static_transform_publisher 0 0 0 0 0 0 map odom &
 
