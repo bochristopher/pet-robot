@@ -1,9 +1,14 @@
-#!/usr/bin/env python3
+    #!/usr/bin/env python3
 """
 LIDAR Filter Node - Cleans up LaserScan data
 
 Applies temporal median filtering and spatial noise removal to reduce
 spurious readings from RPLidar. Handles variable-length scans gracefully.
+
+Optimized for indoor robot navigation:
+- Clips distant readings that aren't useful
+- Removes isolated noise points
+- Temporal smoothing to reduce jitter
 """
 
 import rclpy
@@ -19,15 +24,17 @@ class LidarFilter(Node):
         
         self.declare_parameter("window_size", 3)
         self.declare_parameter("min_range", 0.15)
-        self.declare_parameter("max_range", 10.0)
+        self.declare_parameter("max_range", 4.0)  # 4m is plenty for indoor navigation
         self.declare_parameter("neighbor_threshold", 0.3)
         self.declare_parameter("min_neighbors", 2)
+        self.declare_parameter("intensity_threshold", 0)  # Filter low-intensity returns
         
         self.window_size = self.get_parameter("window_size").value
         self.min_range = self.get_parameter("min_range").value
         self.max_range = self.get_parameter("max_range").value
         self.neighbor_threshold = self.get_parameter("neighbor_threshold").value
         self.min_neighbors = self.get_parameter("min_neighbors").value
+        self.intensity_threshold = self.get_parameter("intensity_threshold").value
         
         # Store (length, ranges) tuples to track lengths
         self.scan_buffer = deque(maxlen=self.window_size)
@@ -43,18 +50,29 @@ class LidarFilter(Node):
         
         self.get_logger().info(
             f"LIDAR filter started (window={self.window_size}, "
-            f"range={self.min_range}-{self.max_range}m)"
+            f"range={self.min_range}-{self.max_range}m, "
+            f"noise_filter=neighbors>={self.min_neighbors})"
         )
 
     def scan_callback(self, msg):
         ranges = np.array(msg.ranges, dtype=np.float32)
         current_length = len(ranges)
         
-        # Replace inf/nan with max_range
+        # Get intensity data if available (for filtering weak returns)
+        has_intensity = len(msg.intensities) == current_length
+        if has_intensity:
+            intensities = np.array(msg.intensities, dtype=np.float32)
+        
+        # Replace inf/nan with max_range (marks them as "no reading")
         ranges = np.where(np.isfinite(ranges), ranges, self.max_range)
 
-        # Clamp to valid range
+        # Clip readings beyond useful range - distant readings are noise for indoor nav
         ranges = np.clip(ranges, self.min_range, self.max_range)
+        
+        # Filter out low-intensity returns (weak reflections = unreliable)
+        if has_intensity and self.intensity_threshold > 0:
+            weak_returns = intensities < self.intensity_threshold
+            ranges[weak_returns] = self.max_range
 
         # Add to buffer with length tracking
         self.scan_buffer.append((current_length, ranges.copy()))
@@ -76,7 +94,7 @@ class LidarFilter(Node):
                     # Fallback: shapes still don't match (shouldn't happen)
                     pass
         
-        # Remove isolated noise points
+        # Remove isolated noise points (sporadic readings with no neighbors)
         filtered = self.remove_noise(ranges)
         
         # Publish filtered scan
@@ -90,15 +108,18 @@ class LidarFilter(Node):
         out.range_min = self.min_range
         out.range_max = self.max_range
         out.ranges = filtered.tolist()
-        out.intensities = msg.intensities
+        # Don't forward intensities - they've been used for filtering
+        out.intensities = []
         
         self.scan_pub.publish(out)
         
         # Log occasional stats
         self.scan_count += 1
         if self.scan_count % 500 == 0:
+            valid_count = np.sum(filtered < self.max_range)
             self.get_logger().info(
-                f"Processed {self.scan_count} scans, current length: {current_length}"
+                f"Processed {self.scan_count} scans | "
+                f"{valid_count}/{current_length} valid points"
             )
 
     def remove_noise(self, ranges):
