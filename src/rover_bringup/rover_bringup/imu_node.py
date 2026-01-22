@@ -110,14 +110,13 @@ class MPU6050:
             ay_sum += ay
             az_sum += az
             time.sleep(0.01)
-        # X and Y should be 0 when level
+        # X and Y should be 0 when level - store offsets
         self.accel_offset_x = ax_sum / samples
         self.accel_offset_y = ay_sum / samples
-        # Z should be 9.81 when level, calculate scale factor
+        # Z should be 9.81 when level - store offset from expected value
         avg_z = az_sum / samples
-        self.accel_scale = 9.81 / avg_z if abs(avg_z) > 0.1 else 1.0
-        # Don't offset Z, just scale it
-        self.accel_offset_z = 0.0
+        self.accel_offset_z = avg_z - 9.81  # Offset to make Z read 9.81
+        self.accel_scale = 1.0  # Don't scale, just offset
 
     def _read_word(self, reg):
         """Read a 16-bit signed value."""
@@ -143,11 +142,13 @@ class MPU6050:
         return ax, ay, az
 
     def read_accel(self):
-        """Read calibrated accelerometer data in m/s²."""
+        """Read calibrated accelerometer data in m/s².
+        When stationary and level: X≈0, Y≈0, Z≈9.81
+        """
         ax, ay, az = self._read_accel_raw()
-        ax = (ax - self.accel_offset_x) * self.accel_scale
-        ay = (ay - self.accel_offset_y) * self.accel_scale
-        az = az * self.accel_scale
+        ax = ax - self.accel_offset_x  # Should be ~0 when level
+        ay = ay - self.accel_offset_y  # Should be ~0 when level
+        az = az - self.accel_offset_z  # Should be ~9.81 when level
         return ax, ay, az
 
     def read_gyro(self):
@@ -159,26 +160,31 @@ class MPU6050:
         return gx, gy, gz
 
     def update_orientation(self):
-        """Update roll/pitch/yaw using complementary filter."""
+        """Update roll/pitch using complementary filter.
+        Note: Yaw is NOT integrated since there's no magnetometer - it would drift.
+        Yaw is kept at 0 (or could use gyro for short-term changes only).
+        """
         now = time.time()
         ax, ay, az = self.read_accel()
         gx, gy, gz = self.read_gyro()
 
-        # Compute angles from accelerometer
+        # Compute angles from accelerometer (gravity reference)
         accel_roll = math.atan2(ay, az)
         accel_pitch = math.atan2(-ax, math.sqrt(ay*ay + az*az))
 
         if self.last_time is None:
-            # First reading
+            # First reading - use accelerometer only
             self.roll = accel_roll
             self.pitch = accel_pitch
-            self.yaw = 0.0
+            self.yaw = 0.0  # No magnetometer, can't determine absolute yaw
         else:
             dt = now - self.last_time
-            # Complementary filter
+            # Complementary filter for roll and pitch only
             self.roll = self.alpha * (self.roll + gx * dt) + (1 - self.alpha) * accel_roll
             self.pitch = self.alpha * (self.pitch + gy * dt) + (1 - self.alpha) * accel_pitch
-            self.yaw += gz * dt  # Yaw from gyro only
+            # Don't accumulate yaw - no magnetometer means it would drift indefinitely
+            # Keep yaw at 0 (robot's initial heading)
+            self.yaw = 0.0
 
         self.last_time = now
         return ax, ay, az, gx, gy, gz
@@ -211,7 +217,9 @@ class ImuNode(Node):
         try:
             self.mpu = MPU6050(bus_num, address)
             self.get_logger().info(f'MPU6050 initialized on I2C bus {bus_num}, address 0x{address:02x}')
-            self.get_logger().info(f'Accel calibration: offset=({self.mpu.accel_offset_x:.3f}, {self.mpu.accel_offset_y:.3f}), scale={self.mpu.accel_scale:.4f}')
+            self.get_logger().info(f'Accel offsets: X={self.mpu.accel_offset_x:.3f}, Y={self.mpu.accel_offset_y:.3f}, Z={self.mpu.accel_offset_z:.3f}')
+            self.get_logger().info(f'Gyro offsets: X={self.mpu.gyro_offset_x:.4f}, Y={self.mpu.gyro_offset_y:.4f}, Z={self.mpu.gyro_offset_z:.4f}')
+            self.get_logger().info('Note: No magnetometer - yaw orientation is fixed at 0')
         except Exception as e:
             self.get_logger().error(f'Failed to initialize MPU6050: {e}')
 
@@ -251,9 +259,11 @@ class ImuNode(Node):
             msg.linear_acceleration.z = az
 
             # Covariances
-            msg.orientation_covariance[0] = 0.01
-            msg.orientation_covariance[4] = 0.01
-            msg.orientation_covariance[8] = 0.01
+            # Roll and pitch are from accelerometer + gyro fusion
+            msg.orientation_covariance[0] = 0.01  # roll variance
+            msg.orientation_covariance[4] = 0.01  # pitch variance
+            # Yaw is unreliable (no magnetometer) - set to -1 per REP-103
+            msg.orientation_covariance[8] = -1.0  # yaw invalid
 
             msg.angular_velocity_covariance[0] = 0.02
             msg.angular_velocity_covariance[4] = 0.02

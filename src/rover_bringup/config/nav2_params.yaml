@@ -197,7 +197,8 @@ local_costmap:
         z_voxels: 16
         max_obstacle_height: 2.0
         mark_threshold: 0
-        observation_sources: scan depth_camera ultrasonic_fl ultrasonic_fr ultrasonic_back
+        # Note: VoxelLayer only supports LaserScan and PointCloud2, not Range
+        observation_sources: scan depth_camera
         scan:
           topic: /scan
           max_obstacle_height: 2.0
@@ -219,27 +220,8 @@ local_costmap:
           obstacle_min_range: 0.2
           raytrace_max_range: 4.0
           raytrace_min_range: 0.2
-        ultrasonic_fl:
-          topic: /ultrasonic/front_left
-          data_type: "Range"
-          marking: True
-          clearing: True
-          obstacle_max_range: 2.0
-          obstacle_min_range: 0.02
-        ultrasonic_fr:
-          topic: /ultrasonic/front_right
-          data_type: "Range"
-          marking: True
-          clearing: True
-          obstacle_max_range: 2.0
-          obstacle_min_range: 0.02
-        ultrasonic_back:
-          topic: /ultrasonic/back_center
-          data_type: "Range"
-          marking: True
-          clearing: True
-          obstacle_max_range: 2.0
-          obstacle_min_range: 0.02
+      # Ultrasonic sensors removed - VoxelLayer doesn't support Range type
+      # Consider adding nav2_costmap_2d::RangeSensorLayer for ultrasonics
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: True
