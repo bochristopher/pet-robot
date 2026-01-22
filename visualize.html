@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pet Robot - Live Sensor View</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            color: #e0e0e0;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        h1 {
+            text-align: center;
+            color: #00d4ff;
+            margin-bottom: 20px;
+            text-shadow: 0 0 20px rgba(0, 212, 255, 0.5);
+            font-size: 2.5em;
+        }
+        .status {
+            text-align: center;
+            padding: 10px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            font-weight: bold;
+        }
+        .status.connected { background: rgba(0, 255, 100, 0.2); color: #00ff64; }
+        .status.disconnected { background: rgba(255, 50, 50, 0.2); color: #ff5050; }
+        .status.connecting { background: rgba(255, 200, 0, 0.2); color: #ffc800; }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+        }
+        .card h2 {
+            color: #00d4ff;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+            border-bottom: 1px solid rgba(0, 212, 255, 0.3);
+            padding-bottom: 10px;
+        }
+        .sensor-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .sensor-label { color: #888; }
+        .sensor-value { color: #00ff64; font-weight: bold; }
+        .sensor-value.warning { color: #ffc800; }
+        .sensor-value.danger { color: #ff5050; }
+        #lidar-canvas {
+            width: 100%;
+            height: 300px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+        }
+        .odom-viz {
+            position: relative;
+            width: 100%;
+            height: 200px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        #robot-dot {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background: #00d4ff;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 0 20px rgba(0, 212, 255, 0.8);
+        }
+        #robot-trail {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        .imu-bar {
+            height: 20px;
+            background: rgba(0, 212, 255, 0.3);
+            border-radius: 4px;
+            margin: 5px 0;
+            position: relative;
+            overflow: hidden;
+        }
+        .imu-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00d4ff, #00ff64);
+            border-radius: 4px;
+            transition: width 0.1s;
+        }
+    </style>
+</head>
+<body>
+    <h1>🤖 Pet Robot - Live View</h1>
+    <div id="status" class="status disconnected">Disconnected</div>
+    
+    <div class="grid">
+        <!-- Odometry Card -->
+        <div class="card">
+            <h2>📍 Odometry</h2>
+            <div class="sensor-row">
+                <span class="sensor-label">Position X</span>
+                <span id="odom-x" class="sensor-value">--</span>
+            </div>
+            <div class="sensor-row">
+                <span class="sensor-label">Position Y</span>
+                <span id="odom-y" class="sensor-value">--</span>
+            </div>
+            <div class="sensor-row">
+                <span class="sensor-label">Heading</span>
+                <span id="odom-theta" class="sensor-value">--</span>
+            </div>
+            <div class="sensor-row">
+                <span class="sensor-label">Linear Vel</span>
+                <span id="odom-linear" class="sensor-value">--</span>
+            </div>
+            <div class="sensor-row">
+                <span class="sensor-label">Angular Vel</span>
+                <span id="odom-angular" class="sensor-value">--</span>
+            </div>
+            <div class="odom-viz">
+                <canvas id="robot-trail" width="300" height="200"></canvas>
+                <div id="robot-dot"></div>
+            </div>
+        </div>
+
+        <!-- Ultrasonic Card -->
+        <div class="card">
+            <h2>📡 Ultrasonics</h2>
+            <div class="sensor-row">
+                <span class="sensor-label">Front Left</span>
+                <span id="us-fl" class="sensor-value">--</span>
+            </div>
+            <div class="sensor-row">
+                <span class="sensor-label">Front Right</span>
+                <span id="us-fr" class="sensor-value">--</span>
+            </div>
+            <div class="sensor-row">
+                <span class="sensor-label">Back Center</span>
+                <span id="us-back" class="sensor-value">--</span>
+            </div>
+        </div>
+
+        <!-- IMU Card -->
+        <div class="card">
+            <h2>🧭 IMU</h2>
+            <div class="sensor-row">
+                <span class="sensor-label">Roll</span>
+                <span id="imu-roll" class="sensor-value">--</span>
+            </div>
+            <div class="sensor-row">
+                <span class="sensor-label">Pitch</span>
+                <span id="imu-pitch" class="sensor-value">--</span>
+            </div>
+            <div class="sensor-row">
+                <span class="sensor-label">Gyro Z</span>
+                <span id="imu-gyro-z" class="sensor-value">--</span>
+            </div>
+            <div class="sensor-row">
+                <span class="sensor-label">Accel X</span>
+                <div class="imu-bar"><div id="accel-x-bar" class="imu-bar-fill" style="width: 50%"></div></div>
+            </div>
+            <div class="sensor-row">
+                <span class="sensor-label">Accel Y</span>
+                <div class="imu-bar"><div id="accel-y-bar" class="imu-bar-fill" style="width: 50%"></div></div>
+            </div>
+        </div>
+
+        <!-- LIDAR Card -->
+        <div class="card" style="grid-column: span 2;">
+            <h2>🔴 LIDAR (Filtered)</h2>
+            <canvas id="lidar-canvas"></canvas>
+            <div class="sensor-row">
+                <span class="sensor-label">Scan Rate</span>
+                <span id="lidar-rate" class="sensor-value">--</span>
+            </div>
+        </div>
+
+        <!-- Encoders Card -->
+        <div class="card">
+            <h2>⚙️ Wheel Encoders</h2>
+            <div class="sensor-row">
+                <span class="sensor-label">Left Ticks</span>
+                <span id="enc-left" class="sensor-value">--</span>
+            </div>
+            <div class="sensor-row">
+                <span class="sensor-label">Right Ticks</span>
+                <span id="enc-right" class="sensor-value">--</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Foxglove WebSocket client
+        const WS_URL = 'ws://localhost:8765';
+        let ws = null;
+        let subscriptions = {};
+        let lidarData = [];
+        let odomHistory = [];
+        const MAX_TRAIL = 200;
+        let lastLidarTime = 0;
+        let lidarCount = 0;
+
+        function connect() {
+            document.getElementById('status').textContent = 'Connecting...';
+            document.getElementById('status').className = 'status connecting';
+            
+            ws = new WebSocket(WS_URL);
+            
+            ws.onopen = () => {
+                document.getElementById('status').textContent = 'Connected to Foxglove Bridge';
+                document.getElementById('status').className = 'status connected';
+                
+                // Subscribe to topics
+                subscribe('/odom', 'nav_msgs/msg/Odometry');
+                subscribe('/ultrasonic/front_left', 'sensor_msgs/msg/Range');
+                subscribe('/ultrasonic/front_right', 'sensor_msgs/msg/Range');
+                subscribe('/ultrasonic/back_center', 'sensor_msgs/msg/Range');
+                subscribe('/imu/data', 'sensor_msgs/msg/Imu');
+                subscribe('/scan_filtered', 'sensor_msgs/msg/LaserScan');
+                subscribe('/wheel_encoders', 'std_msgs/msg/Int32MultiArray');
+            };
+            
+            ws.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    if (msg.op === 'message') {
+                        handleMessage(msg.topic, msg.msg);
+                    }
+                } catch (e) {
+                    // Binary message or parse error
+                }
+            };
+            
+            ws.onclose = () => {
+                document.getElementById('status').textContent = 'Disconnected - Reconnecting...';
+                document.getElementById('status').className = 'status disconnected';
+                setTimeout(connect, 2000);
+            };
+            
+            ws.onerror = (err) => {
+                console.error('WebSocket error:', err);
+            };
+        }
+
+        function subscribe(topic, type) {
+            const id = Math.random().toString(36).substr(2, 9);
+            subscriptions[topic] = id;
+            ws.send(JSON.stringify({
+                op: 'subscribe',
+                id: id,
+                topic: topic,
+                type: type
+            }));
+        }
+
+        function handleMessage(topic, msg) {
+            switch(topic) {
+                case '/odom':
+                    updateOdom(msg);
+                    break;
+                case '/ultrasonic/front_left':
+                    updateUltrasonic('us-fl', msg.range);
+                    break;
+                case '/ultrasonic/front_right':
+                    updateUltrasonic('us-fr', msg.range);
+                    break;
+                case '/ultrasonic/back_center':
+                    updateUltrasonic('us-back', msg.range);
+                    break;
+                case '/imu/data':
+                    updateIMU(msg);
+                    break;
+                case '/scan_filtered':
+                    updateLidar(msg);
+                    break;
+                case '/wheel_encoders':
+                    updateEncoders(msg);
+                    break;
+            }
+        }
+
+        function updateOdom(msg) {
+            const x = msg.pose.pose.position.x;
+            const y = msg.pose.pose.position.y;
+            const q = msg.pose.pose.orientation;
+            const theta = Math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z));
+            
+            document.getElementById('odom-x').textContent = x.toFixed(3) + ' m';
+            document.getElementById('odom-y').textContent = y.toFixed(3) + ' m';
+            document.getElementById('odom-theta').textContent = (theta * 180 / Math.PI).toFixed(1) + '°';
+            document.getElementById('odom-linear').textContent = msg.twist.twist.linear.x.toFixed(3) + ' m/s';
+            document.getElementById('odom-angular').textContent = msg.twist.twist.angular.z.toFixed(3) + ' rad/s';
+            
+            // Update robot position visualization
+            odomHistory.push({x, y});
+            if (odomHistory.length > MAX_TRAIL) odomHistory.shift();
+            drawOdomTrail(x, y, theta);
+        }
+
+        function drawOdomTrail(x, y, theta) {
+            const canvas = document.getElementById('robot-trail');
+            const ctx = canvas.getContext('2d');
+            const viz = canvas.parentElement;
+            
+            // Scale: 1m = 50px
+            const scale = 50;
+            const centerX = viz.offsetWidth / 2;
+            const centerY = viz.offsetHeight / 2;
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw trail
+            if (odomHistory.length > 1) {
+                ctx.beginPath();
+                ctx.strokeStyle = 'rgba(0, 212, 255, 0.5)';
+                ctx.lineWidth = 2;
+                odomHistory.forEach((p, i) => {
+                    const px = centerX + p.x * scale;
+                    const py = centerY - p.y * scale;
+                    if (i === 0) ctx.moveTo(px, py);
+                    else ctx.lineTo(px, py);
+                });
+                ctx.stroke();
+            }
+            
+            // Update robot dot position
+            const dot = document.getElementById('robot-dot');
+            dot.style.left = (centerX + x * scale) + 'px';
+            dot.style.top = (centerY - y * scale) + 'px';
+        }
+
+        function updateUltrasonic(id, range) {
+            const el = document.getElementById(id);
+            const cm = (range * 100).toFixed(1);
+            el.textContent = cm + ' cm';
+            el.className = 'sensor-value';
+            if (range < 0.2) el.className += ' danger';
+            else if (range < 0.5) el.className += ' warning';
+        }
+
+        function updateIMU(msg) {
+            const q = msg.orientation;
+            const roll = Math.atan2(2 * (q.w * q.x + q.y * q.z), 1 - 2 * (q.x * q.x + q.y * q.y));
+            const pitch = Math.asin(2 * (q.w * q.y - q.z * q.x));
+            
+            document.getElementById('imu-roll').textContent = (roll * 180 / Math.PI).toFixed(2) + '°';
+            document.getElementById('imu-pitch').textContent = (pitch * 180 / Math.PI).toFixed(2) + '°';
+            document.getElementById('imu-gyro-z').textContent = msg.angular_velocity.z.toFixed(3) + ' rad/s';
+            
+            // Update accel bars (normalize to -10 to 10 m/s²)
+            const axPct = Math.min(100, Math.max(0, 50 + msg.linear_acceleration.x * 5));
+            const ayPct = Math.min(100, Math.max(0, 50 + msg.linear_acceleration.y * 5));
+            document.getElementById('accel-x-bar').style.width = axPct + '%';
+            document.getElementById('accel-y-bar').style.width = ayPct + '%';
+        }
+
+        function updateLidar(msg) {
+            lidarData = msg.ranges;
+            drawLidar(msg);
+            
+            // Calculate rate
+            lidarCount++;
+            const now = Date.now();
+            if (now - lastLidarTime > 1000) {
+                document.getElementById('lidar-rate').textContent = lidarCount + ' Hz';
+                lidarCount = 0;
+                lastLidarTime = now;
+            }
+        }
+
+        function drawLidar(msg) {
+            const canvas = document.getElementById('lidar-canvas');
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width = canvas.offsetWidth;
+            const h = canvas.height = canvas.offsetHeight;
+            
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+            ctx.fillRect(0, 0, w, h);
+            
+            const cx = w / 2;
+            const cy = h / 2;
+            const scale = Math.min(w, h) / 8; // 4m radius
+            
+            // Draw range rings
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+            for (let r = 1; r <= 4; r++) {
+                ctx.beginPath();
+                ctx.arc(cx, cy, r * scale, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+            
+            // Draw scan points
+            ctx.fillStyle = '#00ff64';
+            const angleMin = msg.angle_min;
+            const angleInc = msg.angle_increment;
+            
+            msg.ranges.forEach((range, i) => {
+                if (range < msg.range_min || range > msg.range_max) return;
+                
+                const angle = angleMin + i * angleInc;
+                const x = cx + range * scale * Math.cos(angle);
+                const y = cy - range * scale * Math.sin(angle);
+                
+                ctx.beginPath();
+                ctx.arc(x, y, 2, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            
+            // Draw robot
+            ctx.fillStyle = '#00d4ff';
+            ctx.beginPath();
+            ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function updateEncoders(msg) {
+            if (msg.data && msg.data.length >= 2) {
+                document.getElementById('enc-left').textContent = msg.data[0];
+                document.getElementById('enc-right').textContent = msg.data[1];
+            }
+        }
+
+        // Start connection
+        connect();
+        
+        // Resize handler for lidar canvas
+        window.addEventListener('resize', () => {
+            if (lidarData.length > 0) drawLidar({ranges: lidarData});
+        });
+    </script>
+</body>
+</html>
+
