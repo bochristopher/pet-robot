@@ -30,6 +30,7 @@ setup(
             "object_detector = rover_bringup.object_detector:main",
             "lidar_filter = rover_bringup.lidar_filter:main",
             "odometry_node = rover_bringup.odometry_node:main",
+            "battery_monitor = rover_bringup.battery_monitor:main",
         ],
     },
 )
