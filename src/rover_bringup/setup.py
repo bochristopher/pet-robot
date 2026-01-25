@@ -31,6 +31,7 @@ setup(
             "lidar_filter = rover_bringup.lidar_filter:main",
             "odometry_node = rover_bringup.odometry_node:main",
             "battery_monitor = rover_bringup.battery_monitor:main",
+            "ice_agent_node = rover_bringup.ice_agent_node:main",
         ],
     },
 )

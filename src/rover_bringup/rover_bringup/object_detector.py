@@ -7,6 +7,7 @@ Publishes detected objects and can mark obstacles in costmap.
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from sensor_msgs.msg import Image
 from vision_msgs.msg import Detection2DArray, Detection2D, ObjectHypothesisWithPose
 from geometry_msgs.msg import PointStamped
@@ -57,9 +58,16 @@ class ObjectDetector(Node):
         else:
             self.get_logger().warn("YOLO not available. Install with: pip install ultralytics")
 
+        # QoS profile to match camera (BEST_EFFORT)
+        sensor_qos = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1
+        )
+        
         # Subscribers
         self.image_sub = self.create_subscription(
-            Image, "/camera/image_raw", self.image_callback, 10
+            Image, "/camera/image_raw", self.image_callback, sensor_qos
         )
 
         # Publishers
@@ -130,11 +138,11 @@ class ObjectDetector(Node):
                 det = Detection2D()
                 det.header = msg.header
                 
-                # Bounding box center and size
-                det.bbox.center.position.x = (x1 + x2) / 2
-                det.bbox.center.position.y = (y1 + y2) / 2
-                det.bbox.size_x = x2 - x1
-                det.bbox.size_y = y2 - y1
+                # Bounding box center and size (convert numpy to float)
+                det.bbox.center.position.x = float((x1 + x2) / 2)
+                det.bbox.center.position.y = float((y1 + y2) / 2)
+                det.bbox.size_x = float(x2 - x1)
+                det.bbox.size_y = float(y2 - y1)
 
                 # Object hypothesis
                 hyp = ObjectHypothesisWithPose()
