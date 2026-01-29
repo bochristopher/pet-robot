@@ -41,9 +41,6 @@ ws://192.168.1.70:8765
 
 ![Foxglove overview (static)](docs/images/foxglove_overview.jpg)
 
-![Foxglove overview (static 2)](docs/images/foxglove_overview_2.jpg)
-
-![Foxglove overview (static 3)](docs/images/foxglove_overview_3.jpg)
 
 ## Nodes
 
