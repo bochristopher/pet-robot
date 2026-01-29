@@ -53,7 +53,7 @@ ws://<robot-ip>:8765
 
 ## Screenshots
 
-![Foxglove overview](docs/images/foxglove.png)
+![Foxglove overview](docs/images/foxglove.gif)
 
 ## Nodes
 
