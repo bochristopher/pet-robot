@@ -39,7 +39,7 @@ ws://192.168.1.70:8765
 
 ## Screenshots
 
-![Foxglove overview](docs/images/foxglove.png)
+![Foxglove overview](docs/images/foxglove.gif)
 
 ## Nodes
 
