@@ -51,6 +51,10 @@ Connect with Foxglove Studio:
 ws://<robot-ip>:8765
 ```
 
+## Screenshots
+
+![Foxglove overview](docs/images/foxglove.png)
+
 ## Nodes
 
 | Node | Description |
