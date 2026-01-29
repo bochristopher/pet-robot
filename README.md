@@ -2,17 +2,31 @@
 
 A ROS2 Humble rover with mecanum wheels, running on Jetson with comprehensive sensor suite.
 
+## Core Functionalities
+
+- ROS2 Humble bringup on Jetson for full sensor + actuator stack
+- Mecanum drive control with encoder feedback
+- LIDAR + ultrasonic obstacle sensing and filtered scans
+- OAK-D Lite RGB + depth + point cloud for navigation
+- IMU integration with calibration at startup
+- Foxglove bridge for live visualization over WebSocket
+
 ## Hardware
 
 - **Compute:** Jetson (Tegra)
 - **Drive:** Mecanum wheels (4WD omnidirectional)
-- **Controller:** Arduino Mega 2560
+- **Controller:** Arduino Mega 2560 (motor/sensor controller on `/dev/ttyACM0`)
+- **Camera:** OAK-D Lite (DepthAI 2.28.0)
+- **LIDAR:** RPLidar 360° scanner on `/dev/ttyUSB0`
+- **IMU:** MPU6050 on I2C bus 7 (address `0x68`)
+- **Ultrasonics:** 3x sensors (front-left, front-right, back-center)
+- **Encoders:** 2x wheel encoders (left/right)
 
 ## Sensors
 
 | Sensor | Description | Topics |
 |--------|-------------|--------|
-| **OAK-D Lite** | RGB + Stereo Depth + MobileNet-SSD object detection (Myriad X VPU) | `/camera/image_raw`, `/camera/depth/image_raw`, `/camera/detections` |
+| **OAK-D Lite** | RGB + stereo depth + point cloud | `/camera/rgb/image_raw`, `/camera/points` |
 | **RPLidar** | 360° laser scanner, 10Hz | `/scan`, `/scan_filtered` |
 | **MPU6050 IMU** | 6-axis accelerometer + gyroscope (I2C bus 7) | `/imu/data` |
 | **Ultrasonics** | 3x HC-SR04 (front-left, front-right, back-center) | `/ultrasonic/*` |
@@ -34,7 +48,7 @@ source install/setup.bash
 
 Connect with Foxglove Studio:
 ```
-ws://192.168.1.70:8765
+ws://<robot-ip>:8765
 ```
 
 ## Nodes
@@ -46,21 +60,30 @@ ws://192.168.1.70:8765
 | `lidar_filter` | Temporal median filter with noise removal |
 | `imu_node` | MPU6050 with auto-calibration at startup |
 
+## Key Files
+
+- `~/start_rover.sh` - launches all core ROS2 nodes
+- `~/rover_ws/src/rover_bringup/rover_bringup/` - Python nodes:
+  - `motor_controller.py` - mecanum drive, encoders, ultrasonics
+  - `oak_camera_node.py` - OAK-D Lite depth + point cloud for Nav2
+  - `imu_node.py` - MPU6050 with calibration
+  - `lidar_filter.py` - temporal median filter (currently disabled)
+
 ## Calibrations Applied
 
 - **LIDAR:** 180° rotation via TF transform
 - **IMU:** Accelerometer offset and scale calibration (keep rover level at startup)
 - **Encoders:** Polarity corrected (forward = positive)
+- **Camera:** 180° flip (mounted upside down)
 
 ## Topics
 
 ### Camera
-- `/camera/image_raw` - RGB image
-- `/camera/image_raw/compressed` - JPEG compressed
-- `/camera/depth/image_raw` - 16-bit depth in mm
-- `/camera/depth/image_colored/compressed` - Colorized depth visualization
-- `/camera/detections` - Detection2DArray from MobileNet-SSD
-- `/camera/detections/image/compressed` - RGB with bounding boxes
+- `/camera/rgb/image_raw` - RGB image
+- `/camera/image_raw` - RGB image (alias)
+- `/camera/image_annotated` - RGB with overlays (if object detector is running)
+- `/camera/points` - Point cloud
+- `/detections` - Detection messages (if object detector is running)
 
 ### Sensors
 - `/scan` - Raw LIDAR scan
