@@ -7,12 +7,14 @@ Twist commands to /cmd_vel to rotate the robot toward the marker.
 
 import depthai as dai
 import cv2
+import numpy as np
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
 import time
 
 MARKER_ID = 0
+MARKER_SIZE = 0.05  # marker side length in meters
 TURN_SPEED = 5.0  # constant angular speed (rad/s)
 DEADZONE = 0.2  # normalized error threshold (0.0–1.0)
 LOOP_HZ = 30
@@ -45,8 +47,22 @@ def main():
         f"Tracking ArUco ID {MARKER_ID} | speed={TURN_SPEED} | deadzone={DEADZONE} | loop={LOOP_HZ} Hz"
     )
 
+    # 3D object points for a square marker centered at origin
+    half = MARKER_SIZE / 2.0
+    obj_pts = np.array([
+        [-half,  half, 0],
+        [ half,  half, 0],
+        [ half, -half, 0],
+        [-half, -half, 0],
+    ], dtype=np.float32)
+
     try:
         with dai.Device(pipeline) as device:
+            calib = device.readCalibration()
+            intrinsics = calib.getCameraIntrinsics(dai.CameraBoardSocket.CAM_B, 640, 480)
+            camera_matrix = np.array(intrinsics, dtype=np.float32)
+            dist_coeffs = np.array(calib.getDistortionCoefficients(dai.CameraBoardSocket.CAM_B), dtype=np.float32)
+
             q = device.getOutputQueue("mono", maxSize=1, blocking=False)
             loop_count = 0
             rate_t0 = time.monotonic()
@@ -76,10 +92,15 @@ def main():
                             error = (marker_cx - img_cx) / img_half_w
                             if abs(error) > DEADZONE:
                                 twist.angular.z = -TURN_SPEED if error > 0 else TURN_SPEED
+                            # Estimate distance via solvePnP
+                            ok, rvec, tvec = cv2.solvePnP(obj_pts, c, camera_matrix, dist_coeffs)
+                            dist_m = float(np.linalg.norm(tvec)) if ok else float('nan')
+
                             side = "LEFT" if marker_cx < img_cx else "RIGHT"
                             in_dz = abs(error) <= DEADZONE
                             node.get_logger().info(
                                 f"Marker {MARKER_ID} at ({marker_cx:.1f}, {marker_cy:.1f}) | "
+                                f"dist={dist_m:.2f}m | "
                                 f"{side} of center (error={error:+.3f}){' [DEADZONE]' if in_dz else ''} | "
                                 f"angular.z={twist.angular.z:+.2f} rad/s"
                             )
