@@ -35,6 +35,13 @@ except ImportError:
     print("❌ openai not installed: pip install openai")
     sys.exit(1)
 
+# Optional Omi SDK (Bluetooth audio input)
+try:
+    from omi import listen_to_omi, OmiOpusDecoder
+    OMI_AVAILABLE = True
+except Exception:
+    OMI_AVAILABLE = False
+
 
 # =============================================================================
 # CONFIGURATION
@@ -63,6 +70,16 @@ WAKE_WORDS = [
 
 # USB Microphone
 MIC_DEVICE = None  # None = auto-detect
+MIC_DEVICE_NAME = os.environ.get("MIC_DEVICE_NAME")  # Optional substring match
+
+# Omi Bluetooth device (optional)
+OMI_ENABLE = os.environ.get("OMI_ENABLE", "0") == "1"
+OMI_MAC = os.environ.get("OMI_MAC")
+OMI_CHAR_UUID = os.environ.get(
+    "OMI_CHAR_UUID",
+    "19B10001-E8F2-537E-4F6C-D104768A1214"
+)
+OMI_SAMPLE_RATE = int(os.environ.get("OMI_SAMPLE_RATE", "16000"))
 
 # Whisper API costs
 WHISPER_COST_PER_MINUTE = 0.006  # $0.006 per minute
@@ -89,6 +106,13 @@ def find_usb_microphone() -> Optional[int]:
     """Find USB microphone device index."""
     devices = sd.query_devices()
 
+    if MIC_DEVICE_NAME:
+        name_lower = MIC_DEVICE_NAME.lower()
+        for i, dev in enumerate(devices):
+            if dev['max_input_channels'] > 0 and name_lower in dev['name'].lower():
+                print(f"[Voice] 🎤 Using MIC_DEVICE_NAME match: {dev['name']} (device {i})")
+                return i
+
     for i, dev in enumerate(devices):
         name = dev['name'].lower()
         # Look for USB audio input device
@@ -104,6 +128,16 @@ def find_usb_microphone() -> Optional[int]:
         return default
 
     return None
+
+
+def list_input_devices():
+    """List available input devices."""
+    devices = sd.query_devices()
+    print("[Voice] 🎧 Input devices:")
+    for i, dev in enumerate(devices):
+        if dev['max_input_channels'] > 0:
+            default_flag = " (default)" if i == sd.default.device[0] else ""
+            print(f"  - {i}: {dev['name']}{default_flag}")
 
 
 class WhisperListener:
@@ -132,8 +166,23 @@ class WhisperListener:
         self.paused = False  # Pause during speech output
         self.command_queue: queue.Queue = queue.Queue()
 
-        self.mic_device = MIC_DEVICE or find_usb_microphone()
+        self.use_omi = OMI_ENABLE
+        self.mic_device = None
+        if self.use_omi:
+            if not OMI_AVAILABLE:
+                raise RuntimeError("omi-sdk not available. Install: pip install omi-sdk")
+            if not OMI_MAC:
+                raise ValueError("OMI_MAC not set. Run omi-scan and export OMI_MAC.")
+        else:
+            if MIC_DEVICE_NAME:
+                list_input_devices()
+            self.mic_device = MIC_DEVICE or find_usb_microphone()
+
+        self.sample_rate = SAMPLE_RATE
+        self.block_size = BLOCK_SIZE
         self.stream: Optional[sd.InputStream] = None
+        self._omi_thread: Optional[threading.Thread] = None
+        self._omi_running = False
 
         self._audio_buffer = []
         self._speech_start_time: Optional[float] = None
@@ -142,6 +191,7 @@ class WhisperListener:
 
         self._on_wake_callback: Optional[Callable] = None
         self._on_command_callback: Optional[Callable[[str], None]] = None
+        self._on_listening_callback: Optional[Callable[[bool], None]] = None
 
         print(f"[Voice] ✅ Whisper API ready (key: {self.api_key[:8]}...)")
 
@@ -152,6 +202,18 @@ class WhisperListener:
     def set_command_callback(self, callback: Callable[[str], None]):
         """Set callback for command transcription."""
         self._on_command_callback = callback
+
+    def set_listening_callback(self, callback: Callable[[bool], None]):
+        """Set callback for listening state changes."""
+        self._on_listening_callback = callback
+
+    def _set_listening_state(self, state: bool):
+        """Update listening state and notify callback."""
+        if self.listening_for_command == state:
+            return
+        self.listening_for_command = state
+        if self._on_listening_callback:
+            self._on_listening_callback(state)
 
     def _calculate_rms(self, audio_data: np.ndarray) -> float:
         """Calculate RMS (volume level) of audio."""
@@ -171,12 +233,12 @@ class WhisperListener:
             with wave.open(temp_path, 'wb') as wf:
                 wf.setnchannels(CHANNELS)
                 wf.setsampwidth(2)  # 16-bit
-                wf.setframerate(SAMPLE_RATE)
+                wf.setframerate(self.sample_rate)
                 wf.writeframes(audio_data.tobytes())
 
             # Transcribe with Whisper
             stats.api_calls += 1
-            duration = len(audio_data) / SAMPLE_RATE
+            duration = len(audio_data) / self.sample_rate
             stats.total_audio_seconds += duration
 
             print(f"[Voice] 🌐 Transcribing {duration:.1f}s audio...")
@@ -202,15 +264,47 @@ class WhisperListener:
             print(f"[Voice] ❌ Transcription error: {e}")
             return None
 
+    def _resolve_sample_rate(self) -> int:
+        """Pick a supported input sample rate for the mic device."""
+        candidates = []
+        try:
+            if self.mic_device is not None:
+                info = sd.query_devices(self.mic_device)
+                default_sr = int(info.get("default_samplerate") or 0)
+                if default_sr:
+                    candidates.append(default_sr)
+        except Exception:
+            pass
+
+        candidates.extend([SAMPLE_RATE, 48000, 44100, 32000, 22050, 16000, 8000])
+
+        seen = set()
+        for sr in candidates:
+            if sr in seen or sr <= 0:
+                continue
+            seen.add(sr)
+            try:
+                sd.check_input_settings(
+                    device=self.mic_device,
+                    samplerate=sr,
+                    channels=CHANNELS,
+                    dtype=DTYPE
+                )
+                return sr
+            except Exception:
+                continue
+
+        return SAMPLE_RATE
+
     def _process_audio(self, indata: np.ndarray, frames: int,
                        time_info: dict, status: sd.CallbackFlags):
         """Audio callback - processes incoming audio chunks."""
+        if status:
+            print(f"[Voice] ⚠️  Audio status: {status}")
+
         # Ignore audio if paused (robot is speaking)
         if self.paused:
             return
-
-        if status:
-            print(f"[Voice] ⚠️  Audio status: {status}")
 
         # Convert to mono int16 if needed
         audio = indata.copy()
@@ -218,6 +312,13 @@ class WhisperListener:
             audio = audio[:, 0]  # Take first channel
 
         audio_int16 = (audio * 32767).astype(np.int16) if audio.dtype != np.int16 else audio
+        self._process_audio_array(audio_int16)
+
+    def _process_audio_array(self, audio_int16: np.ndarray):
+        """Process mono int16 audio array for wake word and commands."""
+        # Ignore audio if paused (robot is speaking)
+        if self.paused:
+            return
 
         rms = self._calculate_rms(audio_int16)
         now = time.time()
@@ -227,7 +328,7 @@ class WhisperListener:
             # Check conversation timeout (1 minute of inactivity)
             if self._conversation_wake_time and (now - self._conversation_wake_time) > CONVERSATION_TIMEOUT:
                 print("[Voice] 💤 Conversation timeout - going back to sleep")
-                self.listening_for_command = False
+                self._set_listening_state(False)
                 self._conversation_wake_time = None
                 self._audio_buffer = []
                 self._speech_start_time = None
@@ -259,6 +360,41 @@ class WhisperListener:
                     # Check for wake word
                     if self._audio_buffer and (now - self._speech_start_time) > MIN_SPEECH_DURATION:
                         self._check_wake_word()
+
+    def _process_pcm_bytes(self, pcm_bytes: bytes):
+        """Process raw PCM bytes (int16 mono)."""
+        if not pcm_bytes:
+            return
+        audio_int16 = np.frombuffer(pcm_bytes, dtype=np.int16)
+        if audio_int16.size == 0:
+            return
+        self._process_audio_array(audio_int16)
+
+    def _start_omi_stream(self):
+        """Start Omi Bluetooth audio stream in a background thread."""
+        import asyncio
+
+        self._omi_running = True
+        self.sample_rate = OMI_SAMPLE_RATE
+        self.block_size = max(256, int(self.sample_rate))
+
+        def run():
+            decoder = OmiOpusDecoder()
+
+            def handle_audio(sender, data):
+                if not self._omi_running:
+                    return
+                pcm_data = decoder.decode_packet(data)
+                if pcm_data:
+                    self._process_pcm_bytes(pcm_data)
+
+            async def main():
+                await listen_to_omi(OMI_MAC, OMI_CHAR_UUID, handle_audio)
+
+            asyncio.run(main())
+
+        self._omi_thread = threading.Thread(target=run, daemon=True)
+        self._omi_thread.start()
 
     def _check_wake_word(self):
         """Check if audio contains wake word."""
@@ -301,7 +437,7 @@ class WhisperListener:
         print(f"\n[Voice] 🔔 Wake word detected!")
         stats.wake_words_detected += 1
 
-        self.listening_for_command = True
+        self._set_listening_state(True)
         self._conversation_wake_time = time.time()
         self._audio_buffer = []
         self._speech_start_time = None
@@ -357,21 +493,34 @@ class WhisperListener:
 
         self.running = True
 
-        self.stream = sd.InputStream(
-            device=self.mic_device,
-            samplerate=SAMPLE_RATE,
-            channels=CHANNELS,
-            dtype=DTYPE,
-            blocksize=BLOCK_SIZE,
-            callback=self._process_audio
-        )
-        self.stream.start()
+        if self.use_omi:
+            print(f"[Voice] 🔵 Using Omi Bluetooth input: {OMI_MAC}")
+            print(f"[Voice] ⚙️  Omi sample rate: {self.sample_rate} Hz")
+            self._start_omi_stream()
+        else:
+            self.sample_rate = self._resolve_sample_rate()
+            self.block_size = max(256, int(self.sample_rate))
+            if self.sample_rate != SAMPLE_RATE:
+                print(f"[Voice] ⚙️  Using sample rate {self.sample_rate} Hz (device-supported)")
 
+            self.stream = sd.InputStream(
+                device=self.mic_device,
+                samplerate=self.sample_rate,
+                channels=CHANNELS,
+                dtype=DTYPE,
+                blocksize=self.block_size,
+                callback=self._process_audio
+            )
+            self.stream.start()
+
+        self._set_listening_state(False)
         print(f"[Voice] ✅ Listening! Say '{WAKE_WORDS[0]}' to activate")
 
     def stop(self):
         """Stop listening."""
         self.running = False
+        self._omi_running = False
+        self._set_listening_state(False)
 
         if self.stream:
             self.stream.stop()

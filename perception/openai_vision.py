@@ -36,7 +36,7 @@ FRAME_SIMILARITY_THRESHOLD = 0.95  # Consider frames "same" if > 95% similar
 VISION_PROMPTS = {
     "describe": """Describe what you see in this image in 2-3 sentences.
 Focus on the main subjects, their positions, colors, and any notable details.
-Be specific but concise - this will be spoken aloud by a robot pet.""",
+Be specific but concise - this will be spoken aloud by a polite protocol droid.""",
 
     "describe_brief": """Describe this scene in one short sentence (under 15 words).
 Focus only on the most important element.""",
@@ -73,9 +73,8 @@ Only report if you're reasonably confident you see {target}.""",
 Describe in 1-2 sentences that capture the feeling.
 Consider lighting, colors, activity level, and general vibe.""",
 
-    "explore": """You are a curious robot pet exploring. What's the most interesting thing in this scene?
-Describe it enthusiastically in 1-2 sentences, as if you're a curious pet discovering something new.
-Be playful and express wonder or curiosity.""",
+    "explore": """You are a polite protocol droid exploring. What's the most interesting thing in this scene?
+Describe it in a formal, courteous tone in 1-2 sentences, with mild caution or concern.""",
 }
 
 

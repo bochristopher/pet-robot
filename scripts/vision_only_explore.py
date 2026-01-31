@@ -75,7 +75,7 @@ MAX_CONSECUTIVE_BACKUPS = 3
 # NAVIGATION PROMPT - The brain of the robot!
 # =============================================================================
 
-NAVIGATION_PROMPT = """You are the navigation AI for a SMALL wheeled robot pet (12 inches tall, 12 inches wide, 12 inches long - about 1 cubic foot).
+NAVIGATION_PROMPT = """You are the navigation AI for a SMALL wheeled protocol droid (12 inches tall, 12 inches wide, 12 inches long - about 1 cubic foot).
 
 The camera is mounted at the front of the robot, about 10 inches off the ground.
 
@@ -100,7 +100,7 @@ Analyze this camera view and provide a JSON response:
         "center_clear": true/false,
         "right_clear": true/false
     },
-    "reason": "what you see and why this action"
+    "reason": "what you see and why this action (formal, concise)"
 }
 
 SITUATIONS (be conservative!):
@@ -122,7 +122,7 @@ ACTIONS:
 - "backup": Too close! Back up first
 - "rotate_180": Dead end or cornered
 - "stop": Something blocking, assess before moving
-- "greet": Person detected, be friendly
+- "greet": Person detected, be polite
 
 CRITICAL RULES:
 1. DEFAULT TO CAUTION - if obstacle visible, recommend short/creep/turn, NOT forward_long
@@ -475,12 +475,12 @@ class VisionOnlyExplorer:
         self.consecutive_backups = 0
 
     def _handle_person(self):
-        """Handle person detection - be social!"""
+        """Handle person detection - be polite."""
         self.stats.greetings += 1
         print("[Vision] 👋 Person detected! Greeting...")
         
         self.motors.stop()
-        self._speak("Hello friend!", emotion="excited")
+        self._speak("Good day to you, sir.", emotion="friendly")
         time.sleep(2.0)
 
     def set_voice_describe(self):
@@ -497,14 +497,14 @@ class VisionOnlyExplorer:
             return
         
         prompt = """Describe what you see in this image in 1-2 short sentences.
-Focus on the main objects and their positions. Be concise - this will be spoken aloud."""
+Focus on the main objects and their positions. Be concise and formal - this will be spoken aloud."""
         
         result = self._call_vision_api(prompt, base64_image)
         
         if result:
-            self._speak(f"I see {result}", emotion="curious")
+            self._speak(f"I see {result}", emotion="friendly")
         else:
-            self._speak("I'm having trouble seeing", emotion="apologetic")
+            self._speak("I am having trouble seeing, sir.", emotion="apologetic")
         
         self.voice_describe_requested = False
 
@@ -525,7 +525,7 @@ Focus on the main objects and their positions. Be concise - this will be spoken 
             estimated_calls = int(duration / 4)  # ~4 seconds per cycle
             print(f"[Vision] 💰 Estimated cost: ${estimated_calls * VISION_API_COST:.2f}")
 
-        self._speak("Exploring!", emotion="excited")
+        self._speak("Proceeding to explore, sir.", emotion="friendly")
 
         try:
             while self.exploring and self.running:

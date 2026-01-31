@@ -31,6 +31,7 @@ from perception.openai_vision import OpenAIVision, get_vision
 from actuators.motor_interface import MotorInterface, get_motors
 from brain.robot_brain import RobotBrain, get_brain, BrainResponse
 from scripts.vision_only_explore import VisionOnlyExplorer
+from ros.ros_reporter import RosReporter
 
 
 # =============================================================================
@@ -38,7 +39,7 @@ from scripts.vision_only_explore import VisionOnlyExplorer
 # =============================================================================
 
 # Startup greeting
-STARTUP_GREETING = "Ready! Say: hey robot."
+STARTUP_GREETING = "Protocol droid online. Say: hey robot."
 
 # Command patterns for quick actions (bypass AI for speed)
 QUICK_COMMANDS = {
@@ -93,10 +94,12 @@ class RobotPet:
         self.motors = get_motors()
         self.brain = get_brain()
         self.explorer: Optional[VisionOnlyExplorer] = None  # Lazy init - Vision API only
+        self.ros_reporter = RosReporter()
 
         # Set up callbacks
         self.listener.set_wake_callback(self._on_wake)
         self.listener.set_command_callback(self._on_command)
+        self.listener.set_listening_callback(self._on_listening_state)
 
         print("\n✅ All modules loaded!")
         print("="*60)
@@ -104,6 +107,8 @@ class RobotPet:
     def _speak(self, text: str, emotion: str = "friendly", blocking: bool = True):
         """Speak with automatic listener pause/resume to prevent self-hearing."""
         # Pause listener to avoid hearing ourselves
+        self.ros_reporter.publish_spoken(text)
+        self.ros_reporter.publish_listening(False)
         self.listener.pause()
 
         # Speak
@@ -116,15 +121,21 @@ class RobotPet:
         # Resume listener
         time.sleep(0.5)  # Extra buffer
         self.listener.resume()
+        self.ros_reporter.publish_listening(True)
     
     def _on_wake(self):
         """Called when wake word is detected."""
         # Play a quick acknowledgment sound
-        self._speak("Yes?", emotion="curious", blocking=False)
+        self._speak("Yes, sir?", emotion="curious", blocking=False)
     
     def _on_command(self, command: str):
         """Called when a command is transcribed."""
+        self.ros_reporter.publish_heard(command)
         self._process_command(command)
+
+    def _on_listening_state(self, is_listening: bool):
+        """Called when listening state changes."""
+        self.ros_reporter.publish_listening(is_listening)
     
     def _check_quick_command(self, command: str) -> Optional[dict]:
         """Check if command matches a quick action."""
@@ -212,11 +223,11 @@ class RobotPet:
             
             # Quick verbal response
             if action_type == "move":
-                self._speak("On it!", emotion="playful", blocking=False)
+                self._speak("Certainly, sir.", emotion="friendly", blocking=False)
             elif action_type == "rotate":
-                self._speak("Wheee!", emotion="excited", blocking=False)
+                self._speak("Turning now, sir.", emotion="calm", blocking=False)
             elif action_type == "stop":
-                self._speak("Stopping!", emotion="calm")
+                self._speak("Stopping now, sir.", emotion="calm")
 
             self._execute_action(quick)
             return
@@ -224,21 +235,26 @@ class RobotPet:
         # Check for exploration
         if self._is_explore_command(command):
             # Short response to avoid voice loop
-            self._speak("OK!", emotion="excited")
+            self._speak("Very well, sir.", emotion="friendly")
             self._start_exploration()
             return
 
         # Check for vision commands
         if self._needs_vision(command):
-            self._speak("Let me look...", emotion="curious", blocking=True)
+            self._speak("Allow me to look, sir...", emotion="curious", blocking=True)
 
             description = self.vision.describe_scene()
             if description:
                 self.brain.set_vision_context(description)
-                response = self.brain.think(f"I see: {description}. Describe this excitedly.")
-                self._speak(response.text, emotion="excited")
+                response = self.brain.think(
+                    f"I see: {description}. Describe this in a formal, polite tone."
+                )
+                self._speak(response.text, emotion="friendly")
             else:
-                self._speak("Hmm, I'm having trouble seeing right now.", emotion="apologetic")
+                self._speak(
+                    "I am having trouble seeing at the moment, sir.",
+                    emotion="apologetic"
+                )
             return
 
         # Use AI brain for complex commands
@@ -298,7 +314,7 @@ class RobotPet:
             self.motors.turn_right(0.3)
 
         self.motors.move_forward(1.0)
-        self._speak("Following you!", emotion="playful")
+        self._speak("Following you now, sir.", emotion="friendly")
     
     def start(self):
         """Start the robot pet."""
@@ -327,7 +343,7 @@ class RobotPet:
         self.motors.stop()
 
         # Say goodbye before stopping listener
-        self._speak("Goodbye! See you later!", emotion="friendly")
+        self._speak("Goodbye, sir. Powering down.", emotion="calm")
 
         self.listener.stop()
         self.vision.release()

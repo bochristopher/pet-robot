@@ -40,46 +40,52 @@ AUDIO_DEVICE = "plughw:0,0"
 VOICE_ID = "21m00Tcm4TlvDq8ikWAM"  # Rachel - consistent voice across all emotions
 
 VOICE_PRESETS = {
+    "formal": {
+        "voice_id": VOICE_ID,
+        "stability": 0.85,
+        "similarity_boost": 0.6,
+        "style": 0.0,
+    },
     "friendly": {
         "voice_id": VOICE_ID,
-        "stability": 0.5,
-        "similarity_boost": 0.75,
+        "stability": 0.75,
+        "similarity_boost": 0.6,
         "style": 0.0,
     },
     "curious": {
         "voice_id": VOICE_ID,
-        "stability": 0.4,
-        "similarity_boost": 0.8,
-        "style": 0.3,
+        "stability": 0.7,
+        "similarity_boost": 0.65,
+        "style": 0.05,
     },
     "excited": {
         "voice_id": VOICE_ID,
-        "stability": 0.3,
-        "similarity_boost": 0.75,
-        "style": 0.5,
+        "stability": 0.6,
+        "similarity_boost": 0.6,
+        "style": 0.1,
     },
     "calm": {
         "voice_id": VOICE_ID,
-        "stability": 0.7,
+        "stability": 0.9,
         "similarity_boost": 0.6,
         "style": 0.0,
     },
     "playful": {
         "voice_id": VOICE_ID,
-        "stability": 0.35,
-        "similarity_boost": 0.75,
-        "style": 0.4,
+        "stability": 0.65,
+        "similarity_boost": 0.6,
+        "style": 0.05,
     },
     "apologetic": {
         "voice_id": VOICE_ID,
-        "stability": 0.6,
-        "similarity_boost": 0.7,
-        "style": 0.1,
+        "stability": 0.8,
+        "similarity_boost": 0.6,
+        "style": 0.0,
     },
 }
 
 # Default voice
-DEFAULT_VOICE = "friendly"
+DEFAULT_VOICE = "formal"
 
 
 @dataclass
@@ -120,7 +126,7 @@ def play_audio_file(audio_path: Path, blocking: bool = True) -> bool:
             "filesrc", f"location={audio_path}",
             "!", "decodebin",
             "!", "audioconvert",
-            "!", "volume", "volume=0.4",  # Reduce volume to 40%
+            "!", "volume", "volume=1.0",  # Max volume
             "!", "audioresample",
             "!", "alsasink", f"device={AUDIO_DEVICE}"
         ]
