@@ -17,11 +17,11 @@ MARKER_ID = 0
 MARKER_SIZE = 0.05  # marker side length in meters
 TURN_SPEED = 0.5  # constant angular speed (rad/s)
 DEADZONE = 0.2  # normalized error threshold (0.0–1.0)
-ALIGN_SPEED = 0.3  # lateral speed for alignment (m/s)
+ALIGN_SPEED = 0.25  # lateral speed for alignment (m/s)
 ALIGN_DEADZONE = 0.005  # lateral offset deadzone (meters)
 TARGET_DIST = 0.1  # desired distance to marker (meters)
 DIST_DEADZONE = 0.01  # distance deadzone (meters)
-APPROACH_SPEED = 0.2  # forward/backward speed (m/s)
+APPROACH_SPEED = 0.25  # forward/backward speed (m/s)
 LOOP_HZ = 30
 
 # 3D object points for a square marker centered at origin
@@ -74,19 +74,15 @@ def align(corners, ids, camera_matrix, dist_coeffs):
         return vel
     ok, rvec, tvec = cv2.solvePnP(OBJ_PTS, c, camera_matrix, dist_coeffs)
     if not ok:
-        print("align: solvePnP failed")
         return vel
-    print(f"align: tvec=({float(tvec[0]):.4f}, {float(tvec[1]):.4f}, {float(tvec[2]):.4f})")
     lateral_offset = float(tvec[0])
-    #print(f"align: lateral_offset={lateral_offset:.4f}m  deadzone={ALIGN_DEADZONE}")
     if abs(lateral_offset) > ALIGN_DEADZONE:
         vel[1] = ALIGN_SPEED if lateral_offset > 0 else -ALIGN_SPEED
-        print(f"align: vel[1]={vel[1]:+.2f}")
     return vel
 
 
-def keep_distance(corners, ids, camera_matrix, dist_coeffs):
-    """Move forward/backward to maintain TARGET_DIST from the marker.
+def keep_distance(corners, ids, camera_matrix, dist_coeffs, target_dist=TARGET_DIST):
+    """Move forward/backward to maintain target_dist from the marker.
 
     Returns np.array([lx, ly, lz, ax, ay, az]).
     """
@@ -98,8 +94,7 @@ def keep_distance(corners, ids, camera_matrix, dist_coeffs):
     if not ok:
         return vel
     dist = float(tvec[2])  # Z axis = distance from camera
-    error = dist - TARGET_DIST
-    print(f"keep_distance: dist={dist:.4f}m  target={TARGET_DIST}  error={error:+.4f}")
+    error = dist - target_dist
     if abs(error) > DIST_DEADZONE:
         vel[0] = APPROACH_SPEED if error > 0 else -APPROACH_SPEED
     return vel
@@ -153,6 +148,13 @@ def main():
 
             q = device.getOutputQueue("mono", maxSize=1, blocking=False)
 
+            stage = 1
+            stage2_start = None
+            STAGE1_DIST = 0.3
+            STAGE2_FROM = 0.3
+            STAGE2_TO = 0.1
+            STAGE2_DURATION = 5.0
+
             while rclpy.ok():
                 t0 = time.monotonic()
 
@@ -165,12 +167,36 @@ def main():
                 gray = frame
                 corners, ids, _ = detector.detectMarkers(gray)
 
-                vel = angular_track(corners, ids, frame.shape, camera_matrix, dist_coeffs)
-                vel += align(corners, ids, camera_matrix, dist_coeffs)
-                vel += keep_distance(corners, ids, camera_matrix, dist_coeffs)
-                twist = _vel_to_twist(vel)
+                if stage == 1:
+                    vel = angular_track(corners, ids, frame.shape, camera_matrix, dist_coeffs)
+                    vel += align(corners, ids, camera_matrix, dist_coeffs)
+                    vel += keep_distance(corners, ids, camera_matrix, dist_coeffs, target_dist=STAGE1_DIST)
+                    twist = _vel_to_twist(vel)
+                    pub.publish(twist)
 
-                pub.publish(twist)
+                    # Check if centered and at distance
+                    centered = abs(vel[5]) == 0  # no angular correction
+                    at_dist = abs(vel[0]) == 0    # no forward/backward correction
+                    if centered and at_dist and _find_marker(corners, ids) is not None:
+                        print("Stage 1 complete: centered and 0.3m away. Starting stage 2.")
+                        stage = 2
+                        stage2_start = time.monotonic()
+
+                elif stage == 2:
+                    elapsed_s2 = time.monotonic() - stage2_start
+                    t_frac = min(elapsed_s2 / STAGE2_DURATION, 1.0)
+                    target = STAGE2_FROM + (STAGE2_TO - STAGE2_FROM) * t_frac
+
+                    vel = angular_track(corners, ids, frame.shape, camera_matrix, dist_coeffs)
+                    vel += align(corners, ids, camera_matrix, dist_coeffs)
+                    vel += keep_distance(corners, ids, camera_matrix, dist_coeffs, target_dist=target)
+                    twist = _vel_to_twist(vel)
+                    pub.publish(twist)
+
+                    if t_frac >= 1.0:
+                        print("Stage 2 complete. Done.")
+                        break
+
                 rclpy.spin_once(node, timeout_sec=0)
 
                 elapsed = time.monotonic() - t0
