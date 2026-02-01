@@ -109,6 +109,7 @@ def main():
                     ts = time.time()
 
                     # Handle keyboard input
+                    cmd_twist = Twist()
                     key = get_key()
                     if key is not None:
                         k = key.lower()
@@ -127,9 +128,7 @@ def main():
                             cmd_twist.angular.z = ANGULAR_SPEED
                         elif k == "e":
                             cmd_twist.angular.z = -ANGULAR_SPEED
-                        elif k == " ":
-                            cmd_twist = Twist()
-                        pub.publish(cmd_twist)
+                    pub.publish(cmd_twist)
 
                     # Drain latest ROS messages
                     rclpy.spin_once(node, timeout_sec=0)
