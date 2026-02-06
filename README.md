@@ -26,19 +26,26 @@ An autonomous robot pet built on **Jetson Orin Nano** with voice interaction, co
 pip3 install -r requirements.txt
 ```
 
-### 2. Setup API Keys
+### 2. Setup Environment
 ```bash
-# Get API keys from:
-# - ElevenLabs: https://elevenlabs.io/
-# - OpenAI: https://platform.openai.com/
+# Use the setup script (recommended - handles all configuration)
+source setup_env.sh
 
-export ELEVENLABS_API_KEY="your_key_here"
-export OPENAI_API_KEY="your_key_here"
+# Or manually set required variables:
 
-# Or add to ~/.bashrc for persistence
-echo 'export ELEVENLABS_API_KEY="your_key"' >> ~/.bashrc
+# REQUIRED: Authentication token for motor control
+export ROBOT_AUTH_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+
+# API keys (get from respective websites)
+export OPENAI_API_KEY="your_key_here"      # https://platform.openai.com/
+export ELEVENLABS_API_KEY="your_key_here"  # https://elevenlabs.io/ (optional)
+
+# Add to ~/.bashrc for persistence
+echo 'export ROBOT_AUTH_TOKEN="your_token"' >> ~/.bashrc
 echo 'export OPENAI_API_KEY="your_key"' >> ~/.bashrc
 ```
+
+See [SECURITY.md](SECURITY.md) for full security configuration.
 
 ### 3. Download Vosk Speech Model
 ```bash
@@ -85,12 +92,19 @@ python3 motor_interface.py --ping
 
 ```
 robot_pet/
-├── robot_pet.py           # Main integration
-├── voice_listener.py      # Vosk STT
-├── elevenlabs_speaker.py  # ElevenLabs TTS
-├── openai_vision.py       # GPT-4V vision
-├── motor_interface.py     # Motor control
-├── robot_brain.py         # GPT-4 personality
+├── setup_env.sh           # Environment setup script
+├── SECURITY.md            # Security documentation
+├── voice/
+│   ├── whisper_listener.py    # OpenAI Whisper STT
+│   └── elevenlabs_speaker.py  # ElevenLabs TTS
+├── perception/
+│   ├── openai_vision.py       # GPT-4V vision
+│   └── face_recognition_simple.py
+├── actuators/
+│   ├── motor_interface.py     # Motor control client
+│   └── simple_motor_server.py # WebSocket motor server
+├── brain/
+│   └── robot_brain.py         # GPT-4 personality
 └── requirements.txt
 ```
 
