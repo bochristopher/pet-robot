@@ -13,6 +13,7 @@ Features:
 
 import os
 import sys
+import re
 import hashlib
 import asyncio
 import subprocess
@@ -22,6 +23,17 @@ import time
 from pathlib import Path
 from typing import Optional
 from dataclasses import dataclass
+
+
+def sanitize_text(text: str, max_length: int = 500) -> str:
+    """Sanitize text before passing to speech synthesis."""
+    if not text:
+        return ""
+    text = text[:max_length]
+    # Remove potentially dangerous characters
+    text = re.sub(r'[^a-zA-Z0-9\s.,!?\'-]', '', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
 
 # Cost tracking
 api_calls = 0
@@ -198,11 +210,14 @@ def speak_pyttsx3_fallback(text: str) -> bool:
         
     except Exception as e:
         print(f"[Speaker] Fallback failed: {e}")
-        # Last resort: espeak
+        # Last resort: espeak (sanitize input first)
         try:
-            subprocess.run(["espeak", "-s", "150", text], timeout=30)
-            return True
-        except:
+            safe_text = sanitize_text(text)
+            if safe_text:
+                subprocess.run(["espeak", "-s", "150", safe_text], timeout=30)
+                return True
+            return False
+        except Exception:
             return False
 
 
@@ -232,7 +247,7 @@ class ElevenLabsSpeaker:
 
             self.client = ElevenLabs(api_key=self.api_key)
             self.available = True
-            print(f"[Speaker] ✅ ElevenLabs initialized (key: {self.api_key[:8]}...)")
+            print(f"[Speaker] ✅ ElevenLabs initialized [API key configured]")
 
         except ImportError:
             print("[Speaker] ⚠️  elevenlabs library not installed")

@@ -101,9 +101,24 @@ GRID_CENTER = GRID_SIZE // 2
 
 # ============ VOICE WITH PERSONALITY ============
 import random
+import re
 
 last_speak_time = 0
 last_phrase_key = None
+
+
+def sanitize_speech_text(text: str, max_length: int = 200) -> str:
+    """Sanitize text before passing to speech synthesis to prevent injection."""
+    if not text:
+        return ""
+    # Limit length to prevent resource exhaustion
+    text = text[:max_length]
+    # Remove potentially dangerous characters (shell metacharacters)
+    # Allow only alphanumeric, spaces, basic punctuation
+    text = re.sub(r'[^a-zA-Z0-9\s.,!?\'-]', '', text)
+    # Collapse multiple spaces
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
 
 # Personality phrases - polite protocol droid style
 PHRASES = {
@@ -242,15 +257,20 @@ def speak(key_or_text, min_interval=2.0):
 
     def _speak():
         try:
+            # Sanitize text before passing to subprocess
+            safe_text = sanitize_speech_text(text)
+            if not safe_text:
+                return
+
             if ELEVENLABS_AVAILABLE:
-                elevenlabs_speak(text, blocking=False)
+                elevenlabs_speak(safe_text, blocking=False)
             else:
                 env = os.environ.copy()
                 env['ALSA_CARD'] = '0'
-                subprocess.run(['espeak', '-s', '150', text],
+                subprocess.run(['espeak', '-s', '150', safe_text],
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                             env=env)
-        except:
+                             env=env, timeout=10)  # Add timeout to prevent hangs
+        except Exception:
             pass
     threading.Thread(target=_speak, daemon=True).start()
 

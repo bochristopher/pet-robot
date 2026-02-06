@@ -5,14 +5,21 @@ Compatible with motor_interface.py
 """
 import asyncio
 import json
+import os
+import sys
 import serial
 import websockets
 from websockets.server import serve
 
 # Configuration
-PORT = 8765
-AUTH_TOKEN = "robot_secret_2024"
-ARDUINO_PORT = "/dev/ttyACM0"
+PORT = int(os.environ.get("ROBOT_SERVER_PORT", "8765"))
+BIND_HOST = os.environ.get("ROBOT_BIND_HOST", "127.0.0.1")  # Bind to localhost by default for security
+AUTH_TOKEN = os.environ.get("ROBOT_AUTH_TOKEN")
+if not AUTH_TOKEN:
+    print("❌ SECURITY ERROR: ROBOT_AUTH_TOKEN environment variable must be set!")
+    print("   Generate a secure token: python3 -c \"import secrets; print(secrets.token_urlsafe(32))\"")
+    sys.exit(1)
+ARDUINO_PORT = os.environ.get("ARDUINO_PORT", "/dev/ttyACM0")
 BAUD_RATE = 115200
 
 # Arduino connection
@@ -146,10 +153,12 @@ async def main():
     if not init_arduino():
         print("⚠️  Continuing without Arduino (simulation mode)")
     
-    print(f"\n🚀 Starting WebSocket server on port {PORT}...")
-    
-    async with serve(handle_client, "0.0.0.0", PORT):
-        print(f"✅ Server running on ws://localhost:{PORT}")
+    print(f"\n🚀 Starting WebSocket server on {BIND_HOST}:{PORT}...")
+
+    async with serve(handle_client, BIND_HOST, PORT):
+        print(f"✅ Server running on ws://{BIND_HOST}:{PORT}")
+        if BIND_HOST == "127.0.0.1":
+            print("   (Set ROBOT_BIND_HOST=0.0.0.0 to allow remote connections)")
         print("Press Ctrl+C to stop\n")
         await asyncio.Future()  # Run forever
 

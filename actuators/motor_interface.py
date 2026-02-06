@@ -38,8 +38,11 @@ SERVER_HOST = os.environ.get("ROBOT_SERVER_HOST", "localhost")
 SERVER_PORT = int(os.environ.get("ROBOT_SERVER_PORT", "8765"))
 WS_URL = f"ws://{SERVER_HOST}:{SERVER_PORT}"
 
-# Authentication token
-AUTH_TOKEN = os.environ.get("ROBOT_AUTH_TOKEN", "robot_secret_2024")
+# Authentication token (required - no default for security)
+AUTH_TOKEN = os.environ.get("ROBOT_AUTH_TOKEN")
+if not AUTH_TOKEN:
+    print("⚠️  Warning: ROBOT_AUTH_TOKEN not set - motor control will fail to authenticate")
+    AUTH_TOKEN = ""  # Will fail authentication rather than use insecure default
 
 # Default movement parameters
 DEFAULT_SPEED = 0.5  # Not used by current server but kept for future

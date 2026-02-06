@@ -193,7 +193,7 @@ class WhisperListener:
         self._on_command_callback: Optional[Callable[[str], None]] = None
         self._on_listening_callback: Optional[Callable[[bool], None]] = None
 
-        print(f"[Voice] ✅ Whisper API ready (key: {self.api_key[:8]}...)")
+        print(f"[Voice] ✅ Whisper API ready [API key configured]")
 
     def set_wake_callback(self, callback: Callable):
         """Set callback for wake word detection."""
@@ -228,8 +228,9 @@ class WhisperListener:
             # Concatenate audio chunks
             audio_data = np.concatenate(audio_buffer)
 
-            # Save to temporary WAV file
-            temp_path = tempfile.mktemp(suffix='.wav')
+            # Save to temporary WAV file (using mkstemp for security - atomic creation)
+            fd, temp_path = tempfile.mkstemp(suffix='.wav')
+            os.close(fd)  # Close the file descriptor, we'll reopen with wave
             with wave.open(temp_path, 'wb') as wf:
                 wf.setnchannels(CHANNELS)
                 wf.setsampwidth(2)  # 16-bit

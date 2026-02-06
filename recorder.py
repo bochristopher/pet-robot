@@ -52,16 +52,46 @@ def create_pipeline():
     return pipeline
 
 
+def validate_output_path(folder_path):
+    """Validate output path to prevent path traversal attacks."""
+    # Resolve to absolute path and normalize
+    abs_path = os.path.abspath(os.path.realpath(folder_path))
+
+    # Define allowed base directories (user's home or /tmp)
+    home_dir = os.path.expanduser("~")
+    allowed_bases = [home_dir, "/tmp", "/home"]
+
+    # Check if path is within allowed directories
+    is_allowed = any(abs_path.startswith(base) for base in allowed_bases)
+    if not is_allowed:
+        raise ValueError(f"Output path must be within home directory or /tmp. Got: {abs_path}")
+
+    # Prevent writing to sensitive directories
+    sensitive_paths = ["/etc", "/usr", "/bin", "/sbin", "/var", "/root", "/."]
+    for sensitive in sensitive_paths:
+        if sensitive in abs_path:
+            raise ValueError(f"Cannot write to sensitive path: {abs_path}")
+
+    return abs_path
+
+
 def main():
     parser = argparse.ArgumentParser(description="Record robot data at 30 Hz")
     parser.add_argument("folder", help="Output folder for recorded data")
     args = parser.parse_args()
 
+    # Validate and sanitize output path
+    try:
+        safe_folder = validate_output_path(args.folder)
+    except ValueError as e:
+        print(f"❌ Security error: {e}")
+        sys.exit(1)
+
     # Create output directories
-    images_dir = os.path.join(args.folder, "images")
+    images_dir = os.path.join(safe_folder, "images")
     os.makedirs(images_dir, exist_ok=True)
 
-    vel_path = os.path.join(args.folder, "velocities.txt")
+    vel_path = os.path.join(safe_folder, "velocities.txt")
 
     # ROS2 setup — publish and subscribe cmd_vel
     rclpy.init()
@@ -80,7 +110,7 @@ def main():
     period = 1.0 / LOOP_HZ
 
     node.get_logger().info(
-        f"Recording to {args.folder} at {LOOP_HZ} Hz  (K or Ctrl-C to stop)"
+        f"Recording to {safe_folder} at {LOOP_HZ} Hz  (K or Ctrl-C to stop)"
     )
     node.get_logger().info(
         "Keys: W/S=fwd/back  A/D=left/right  Q/E=turn  Space=stop  K=exit"

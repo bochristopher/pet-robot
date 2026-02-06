@@ -9,12 +9,12 @@ Improved Face Recognition for Robot Pet
 import cv2
 import numpy as np
 import os
-import pickle
+import json
 import time
 
 FACES_DIR = "/home/bo/robot_pet/data/known_faces"
 MODEL_FILE = "/home/bo/robot_pet/data/face_model.yml"
-LABELS_FILE = "/home/bo/robot_pet/data/face_labels.pkl"
+LABELS_FILE = "/home/bo/robot_pet/data/face_labels.json"
 
 # DNN model paths
 DNN_MODEL = "/home/bo/robot_pet/data/models/opencv_face_detector.caffemodel"
@@ -48,11 +48,14 @@ class FaceRecognizer:
         if os.path.exists(MODEL_FILE) and os.path.exists(LABELS_FILE):
             try:
                 self.recognizer.read(MODEL_FILE)
-                with open(LABELS_FILE, 'rb') as f:
-                    self.labels = pickle.load(f)
+                with open(LABELS_FILE, 'r') as f:
+                    # JSON keys are strings, convert to int for label lookup
+                    raw_labels = json.load(f)
+                    self.labels = {int(k): v for k, v in raw_labels.items()}
                 self.trained = True
                 print(f"Loaded face model with {len(self.labels)} people")
-            except:
+            except Exception as e:
+                print(f"[FaceRecog] Failed to load model: {e}")
                 pass
 
     def open_camera(self):
@@ -228,8 +231,9 @@ class FaceRecognizer:
         self.recognizer.write(MODEL_FILE)
 
         self.labels = label_map
-        with open(LABELS_FILE, 'wb') as f:
-            pickle.dump(self.labels, f)
+        with open(LABELS_FILE, 'w') as f:
+            # Convert int keys to strings for JSON compatibility
+            json.dump({str(k): v for k, v in self.labels.items()}, f, indent=2)
 
         self.trained = True
         print("Training complete!")

@@ -63,7 +63,7 @@ class RobotBrain:
             print("[Brain] ❌ OPENAI_API_KEY not set!")
         else:
             self.client = OpenAI(api_key=self.api_key)
-            print(f"[Brain] ✅ Initialized (key: {self.api_key[:8]}...)")
+            print(f"[Brain] ✅ Initialized [API key configured]")
     
     def set_vision_context(self, description: str):
         """Set what the robot currently sees."""

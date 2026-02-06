@@ -165,7 +165,7 @@ class OpenAIVision:
         try:
             from openai import OpenAI
             self.client = OpenAI(api_key=self.api_key)
-            print(f"[Vision] ✅ OpenAI initialized (key: {self.api_key[:8]}...)")
+            print(f"[Vision] ✅ OpenAI initialized [API key configured]")
         except ImportError:
             print("[Vision] ❌ openai library not installed")
             print("         Run: pip install openai")
