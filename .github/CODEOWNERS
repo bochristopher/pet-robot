@@ -1,0 +1,10 @@
+# Code owners - these users will be requested for review on PRs
+
+# Default owner for everything
+* @bochristopher
+
+# Security-sensitive files require owner review
+/actuators/ @bochristopher
+/setup_env.sh @bochristopher
+SECURITY.md @bochristopher
+.github/ @bochristopher

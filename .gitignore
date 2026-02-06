@@ -11,10 +11,18 @@ venv/
 dist/
 build/
 
-# API Keys and Secrets
+# API Keys and Secrets - NEVER COMMIT THESE
 .env
+.env.*
 *.key
 *_key.txt
+secrets.json
+credentials.json
+*_credentials.*
+*.pem
+*.p12
+token.txt
+auth_token*
 
 # Cache directories
 /tmp/
