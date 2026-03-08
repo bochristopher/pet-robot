@@ -41,7 +41,8 @@ class OdometryNode(Node):
         self.declare_parameter('odom_frame', 'odom')
         self.declare_parameter('base_frame', 'base_link')
         self.declare_parameter('use_imu', True)         # Use IMU for heading
-        self.declare_parameter('imu_alpha', 0.98)       # Complementary filter: trust IMU 98%
+        self.declare_parameter('imu_alpha', 0.02)       # Complementary filter: trust encoders 98%, IMU 2%
+        self.declare_parameter('gyro_deadband', 0.03)   # Ignore gyro readings below this (rad/s) to prevent drift
         
         # Get parameters
         self.wheel_radius = self.get_parameter('wheel_radius').value
@@ -52,6 +53,7 @@ class OdometryNode(Node):
         self.base_frame = self.get_parameter('base_frame').value
         self.use_imu = self.get_parameter('use_imu').value
         self.imu_alpha = self.get_parameter('imu_alpha').value
+        self.gyro_deadband = self.get_parameter('gyro_deadband').value
         
         # Calculate meters per tick
         wheel_circumference = 2 * math.pi * self.wheel_radius
@@ -110,7 +112,11 @@ class OdometryNode(Node):
     
     def imu_callback(self, msg: Imu):
         """Store latest IMU gyroscope reading for heading fusion."""
-        self.imu_gyro_z = msg.angular_velocity.z
+        gz = msg.angular_velocity.z
+        # Apply deadband to suppress gyro drift when stationary
+        if abs(gz) < self.gyro_deadband:
+            gz = 0.0
+        self.imu_gyro_z = gz
         self.imu_received = True
         self.last_imu_time = self.get_clock().now()
     

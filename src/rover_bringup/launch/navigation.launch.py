@@ -10,12 +10,12 @@ def generate_launch_description():
     nav2_params = os.path.join(pkg_share, "config", "nav2_params.yaml")
     
     return LaunchDescription([
-        # Motor controller (Arduino communication)
+        # micro-ROS agent (Arduino communication bridge)
         Node(
-            package="rover_bringup",
-            executable="motor_controller",
-            name="motor_controller",
-            parameters=[{"serial_port": "/dev/ttyACM0"}],
+            package="micro_ros_agent",
+            executable="micro_ros_agent",
+            name="micro_ros_agent",
+            arguments=["serial", "--dev", "/dev/ttyACM0", "--baudrate", "115200"],
             output="screen"
         ),
         

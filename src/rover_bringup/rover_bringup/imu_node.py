@@ -88,8 +88,8 @@ class MPU6050:
         # Set accel range to ±2g
         self.bus.write_byte_data(self.address, self.ACCEL_CONFIG, 0x00)
 
-    def _calibrate_gyro(self, samples=50):
-        """Calibrate gyro offsets."""
+    def _calibrate_gyro(self, samples=200):
+        """Calibrate gyro offsets (200 samples over 2 seconds for better accuracy)."""
         gx_sum = gy_sum = gz_sum = 0.0
         for _ in range(samples):
             gx, gy, gz = self._read_gyro_raw()

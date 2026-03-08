@@ -1,0 +1,24 @@
+serial_bridge:
+  ros__parameters:
+    serial_port: "/dev/ttyACM0"
+    baud_rate: 115200
+    reconnect_interval: 2.0
+
+    cmd_vel_timeout: 0.5
+    heartbeat_interval: 0.5
+    heartbeat_timeout: 1.5
+    max_checksum_errors: 10
+
+    # Mecanum geometry (metres)
+    wheel_base: 0.20
+    track_width: 0.22
+    wheel_radius: 0.03
+    encoder_cpr: 1440
+
+    max_motor_speed: 255
+
+    publish_rate_fast: 50.0
+    publish_rate_slow: 2.0
+
+    odom_frame_id: "odom"
+    base_frame_id: "base_link"

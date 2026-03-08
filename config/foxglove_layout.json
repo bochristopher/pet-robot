@@ -1,0 +1,117 @@
+{
+  "configById": {
+    "3D!main": {
+      "cameraState": {
+        "perspective": true,
+        "distance": 5,
+        "phi": 45,
+        "thetaOffset": 0,
+        "targetOffset": [0, 0, 0],
+        "target": [0, 0, 0],
+        "targetOrientation": [0, 0, 0, 1],
+        "fovy": 45,
+        "near": 0.01,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "followTf": "base_link",
+      "scene": {
+        "enableStats": false,
+        "backgroundColor": "#1a1a1e"
+      },
+      "transforms": {
+        "frame:base_link": { "visible": true },
+        "frame:laser": { "visible": true },
+        "frame:odom": { "visible": true },
+        "frame:map": { "visible": true }
+      },
+      "topics": {
+        "/scan_filtered": {
+          "visible": true,
+          "colorField": "intensity",
+          "colorMode": "flat",
+          "flatColor": "#00ff00",
+          "pointSize": 4
+        },
+        "/camera/points": {
+          "visible": true,
+          "colorMode": "flat",
+          "flatColor": "#00aaff",
+          "pointSize": 2
+        }
+      },
+      "layers": {
+        "grid": { "visible": true }
+      }
+    },
+    "RawMessages!alert": {
+      "topicPath": "/ice_agent/alert",
+      "diffEnabled": false,
+      "expansion": "all"
+    },
+    "RawMessages!heard": {
+      "topicPath": "/ice_agent/heard",
+      "diffEnabled": false,
+      "expansion": "all"
+    },
+    "Image!camera": {
+      "topic": "/camera/image_annotated",
+      "rotation": 0,
+      "flipHorizontal": false,
+      "flipVertical": false,
+      "smoothScaling": true,
+      "scale": "contain"
+    },
+    "RawMessages!detections": {
+      "topicPath": "/detections",
+      "diffEnabled": false,
+      "expansion": "all"
+    },
+    "RawMessages!status": {
+      "topicPath": "/ice_agent/status",
+      "diffEnabled": false,
+      "expansion": "all"
+    },
+    "RawMessages!document": {
+      "topicPath": "/ice_agent/document_verified",
+      "diffEnabled": false,
+      "expansion": "all"
+    }
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "linkedGlobalVariables": [],
+  "playbackConfig": { "speed": 1 },
+  "layout": {
+    "first": "3D!main",
+    "second": {
+      "first": {
+        "first": "RawMessages!alert",
+        "second": "RawMessages!heard",
+        "direction": "row",
+        "splitPercentage": 50
+      },
+      "second": {
+        "first": {
+          "first": "Image!camera",
+          "second": "RawMessages!detections",
+          "direction": "row",
+          "splitPercentage": 65
+        },
+        "second": {
+          "first": "RawMessages!status",
+          "second": "RawMessages!document",
+          "direction": "row",
+          "splitPercentage": 50
+        },
+        "direction": "column",
+        "splitPercentage": 50
+      },
+      "direction": "column",
+      "splitPercentage": 33
+    },
+    "direction": "row",
+    "splitPercentage": 30
+  }
+}
+

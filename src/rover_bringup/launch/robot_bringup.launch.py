@@ -65,19 +65,12 @@ def generate_launch_description():
         output='screen',
     )
 
-    # Motor controller node (also handles ultrasonic sensors via Arduino)
+    # micro-ROS agent for Arduino base controller
     motor_node = Node(
-        package='rover_bringup',
-        executable='motor_controller',
-        name='motor_controller',
-        parameters=[{
-            'serial_port': '/dev/ttyACM0',  # Use /dev/arduino after udev rules
-            'baud_rate': 115200,
-            'wheel_base': 0.3,
-            'wheel_radius': 0.05,
-            'max_speed': 1.0,
-            'ultrasonic_sensors': ['front_left', 'front_right', 'back_center'],
-        }],
+        package='micro_ros_agent',
+        executable='micro_ros_agent',
+        name='micro_ros_agent',
+        arguments=['serial', '--dev', '/dev/ttyACM0', '--baudrate', '115200'],
         output='screen',
     )
 

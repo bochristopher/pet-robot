@@ -1,0 +1,223 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="pet_rover">
+  <!--
+    Minimal simulation-oriented model from current rover TF assumptions:
+    - base_link origin at body center
+    - base_footprint on ground
+    - fixed sensor transforms from your bringup launch files
+  -->
+
+  <!-- Main body dimensions (meters) -->
+  <xacro:property name="base_length" value="0.36"/>
+  <xacro:property name="base_width" value="0.30"/>
+  <xacro:property name="base_height" value="0.20"/>
+  <xacro:property name="base_mass" value="12.0"/>
+
+  <!-- Wheel assumptions for visualization -->
+  <xacro:property name="wheel_radius" value="0.05"/>
+  <xacro:property name="wheel_width" value="0.03"/>
+  <xacro:property name="wheel_mass" value="0.35"/>
+  <xacro:property name="wheel_x" value="0.14"/>
+  <xacro:property name="wheel_y" value="0.12"/>
+  <xacro:property name="wheel_z" value="${-base_height/2.0 + wheel_radius}"/>
+
+  <!-- Core links -->
+  <link name="base_footprint"/>
+
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="${base_length} ${base_width} ${base_height}"/>
+      </geometry>
+      <material name="gray">
+        <color rgba="0.35 0.35 0.35 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="${base_length} ${base_width} ${base_height}"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="${base_mass}"/>
+      <inertia
+        ixx="${(1.0/12.0) * base_mass * (base_width*base_width + base_height*base_height)}"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="${(1.0/12.0) * base_mass * (base_length*base_length + base_height*base_height)}"
+        iyz="0.0"
+        izz="${(1.0/12.0) * base_mass * (base_length*base_length + base_width*base_width)}"/>
+    </inertial>
+  </link>
+
+  <!-- Ground frame to body-center frame -->
+  <joint name="base_footprint_to_base_link" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 ${base_height/2.0}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Sensor frames (z values relative to base_link center) -->
+  <link name="laser"/>
+  <joint name="base_link_to_laser" type="fixed">
+    <parent link="base_link"/>
+    <child link="laser"/>
+    <origin xyz="0 0 0.15" rpy="3.14159 0 0"/>
+  </joint>
+
+  <link name="camera_link"/>
+  <joint name="base_link_to_camera_link" type="fixed">
+    <parent link="base_link"/>
+    <child link="camera_link"/>
+    <origin xyz="0.1 0 0.09" rpy="0 0 0"/>
+  </joint>
+
+  <link name="ultrasonic_front_left_link"/>
+  <joint name="base_link_to_ultrasonic_front_left" type="fixed">
+    <parent link="base_link"/>
+    <child link="ultrasonic_front_left_link"/>
+    <origin xyz="0.1 0.1 0.02" rpy="0 0 0.3"/>
+  </joint>
+
+  <link name="ultrasonic_front_right_link"/>
+  <joint name="base_link_to_ultrasonic_front_right" type="fixed">
+    <parent link="base_link"/>
+    <child link="ultrasonic_front_right_link"/>
+    <origin xyz="0.1 -0.1 0.02" rpy="0 0 -0.3"/>
+  </joint>
+
+  <link name="ultrasonic_back_center_link"/>
+  <joint name="base_link_to_ultrasonic_back_center" type="fixed">
+    <parent link="base_link"/>
+    <child link="ultrasonic_back_center_link"/>
+    <origin xyz="-0.1 0 0.02" rpy="0 0 3.14159"/>
+  </joint>
+
+  <!-- Omnidirectional wheel placeholders (visual + inertial + continuous joints) -->
+  <link name="wheel_front_left">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry>
+        <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0.1 0.1 0.1 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry>
+        <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="${wheel_mass}"/>
+      <inertia
+        ixx="${(1.0/12.0) * wheel_mass * (3*wheel_radius*wheel_radius + wheel_width*wheel_width)}"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="${0.5 * wheel_mass * wheel_radius*wheel_radius}"
+        iyz="0.0"
+        izz="${(1.0/12.0) * wheel_mass * (3*wheel_radius*wheel_radius + wheel_width*wheel_width)}"/>
+    </inertial>
+  </link>
+
+  <link name="wheel_front_right">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+      <material name="black"><color rgba="0.1 0.1 0.1 1.0"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="${wheel_mass}"/>
+      <inertia
+        ixx="${(1.0/12.0) * wheel_mass * (3*wheel_radius*wheel_radius + wheel_width*wheel_width)}"
+        ixy="0.0" ixz="0.0"
+        iyy="${0.5 * wheel_mass * wheel_radius*wheel_radius}"
+        iyz="0.0"
+        izz="${(1.0/12.0) * wheel_mass * (3*wheel_radius*wheel_radius + wheel_width*wheel_width)}"/>
+    </inertial>
+  </link>
+
+  <link name="wheel_back_left">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+      <material name="black"><color rgba="0.1 0.1 0.1 1.0"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="${wheel_mass}"/>
+      <inertia
+        ixx="${(1.0/12.0) * wheel_mass * (3*wheel_radius*wheel_radius + wheel_width*wheel_width)}"
+        ixy="0.0" ixz="0.0"
+        iyy="${0.5 * wheel_mass * wheel_radius*wheel_radius}"
+        iyz="0.0"
+        izz="${(1.0/12.0) * wheel_mass * (3*wheel_radius*wheel_radius + wheel_width*wheel_width)}"/>
+    </inertial>
+  </link>
+
+  <link name="wheel_back_right">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+      <material name="black"><color rgba="0.1 0.1 0.1 1.0"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="${wheel_mass}"/>
+      <inertia
+        ixx="${(1.0/12.0) * wheel_mass * (3*wheel_radius*wheel_radius + wheel_width*wheel_width)}"
+        ixy="0.0" ixz="0.0"
+        iyy="${0.5 * wheel_mass * wheel_radius*wheel_radius}"
+        iyz="0.0"
+        izz="${(1.0/12.0) * wheel_mass * (3*wheel_radius*wheel_radius + wheel_width*wheel_width)}"/>
+    </inertial>
+  </link>
+
+  <!-- Continuous wheel joints (visualization placeholder for omnidirectional base) -->
+  <joint name="joint_wheel_front_left" type="continuous">
+    <parent link="base_link"/>
+    <child link="wheel_front_left"/>
+    <origin xyz="${wheel_x} ${wheel_y} ${wheel_z}" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+
+  <joint name="joint_wheel_front_right" type="continuous">
+    <parent link="base_link"/>
+    <child link="wheel_front_right"/>
+    <origin xyz="${wheel_x} ${-wheel_y} ${wheel_z}" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+
+  <joint name="joint_wheel_back_left" type="continuous">
+    <parent link="base_link"/>
+    <child link="wheel_back_left"/>
+    <origin xyz="${-wheel_x} ${wheel_y} ${wheel_z}" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+
+  <joint name="joint_wheel_back_right" type="continuous">
+    <parent link="base_link"/>
+    <child link="wheel_back_right"/>
+    <origin xyz="${-wheel_x} ${-wheel_y} ${wheel_z}" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+</robot>

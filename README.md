@@ -15,7 +15,7 @@ A ROS2 Humble rover with mecanum wheels, running on Jetson with comprehensive se
 
 - **Compute:** Jetson (Tegra)
 - **Drive:** Mecanum wheels (4WD omnidirectional)
-- **Controller:** Arduino Mega 2560 (motor/sensor controller on `/dev/ttyACM0`)
+- **Controller:** Arduino Mega 2560 running micro-ROS firmware on `/dev/ttyACM0`
 - **Camera:** OAK-D Lite (DepthAI 2.28.0)
 - **LIDAR:** RPLidar 360° scanner on `/dev/ttyUSB0`
 - **IMU:** MPU6050 on I2C bus 7 (address `0x68`)
@@ -53,13 +53,18 @@ ws://<robot-ip>:8765
 
 ## Screenshots
 
-![Foxglove overview](docs/images/foxglove.gif)
+![Foxglove overview (static)](docs/images/foxglove_overview.jpg)
+
+![Foxglove overview (static 2)](docs/images/foxglove_overview_2.jpg)
+
+![Foxglove overview](docs/images/foxglove.png)
+
 
 ## Nodes
 
 | Node | Description |
 |------|-------------|
-| `motor_controller` | Mecanum drive control, encoder reading, ultrasonic publishing |
+| `micro_ros_agent` | Bridges ROS 2 DDS over USB serial to Arduino micro-ROS node |
 | `oak_camera_node` | OAK-D Lite RGB, depth, and on-device neural network inference |
 | `lidar_filter` | Temporal median filter with noise removal |
 | `imu_node` | MPU6050 with auto-calibration at startup |
@@ -68,10 +73,18 @@ ws://<robot-ip>:8765
 
 - `~/start_rover.sh` - launches all core ROS2 nodes
 - `~/rover_ws/src/rover_bringup/rover_bringup/` - Python nodes:
-  - `motor_controller.py` - mecanum drive, encoders, ultrasonics
   - `oak_camera_node.py` - OAK-D Lite depth + point cloud for Nav2
   - `imu_node.py` - MPU6050 with calibration
   - `lidar_filter.py` - temporal median filter (currently disabled)
+
+## micro-ROS Drive Base
+
+- Arduino micro-ROS firmware subscribes to `/cmd_vel` and publishes `/wheel_encoders`
+- Jetson runs the bridge agent:
+
+```bash
+ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 --baudrate 115200
+```
 
 ## Calibrations Applied
 

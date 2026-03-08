@@ -6,12 +6,12 @@ from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description():
     return LaunchDescription([
-        # Motor controller
+        # micro-ROS agent
         Node(
-            package="rover_bringup",
-            executable="motor_controller",
-            name="motor_controller",
-            parameters=[{"serial_port": "/dev/ttyACM0"}],
+            package="micro_ros_agent",
+            executable="micro_ros_agent",
+            name="micro_ros_agent",
+            arguments=["serial", "--dev", "/dev/ttyACM0", "--baudrate", "115200"],
             output="screen"
         ),
         

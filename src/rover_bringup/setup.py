@@ -14,6 +14,7 @@ setup(
         (os.path.join("share", package_name, "launch"), glob("launch/*.py")),
         (os.path.join("share", package_name, "config"), glob("config/*.yaml")),
         (os.path.join("share", package_name, "config"), glob("config/*.rviz")),
+        (os.path.join("share", package_name, "urdf"), glob("urdf/*")),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
@@ -23,7 +24,6 @@ setup(
     license="MIT",
     entry_points={
         "console_scripts": [
-            "motor_controller = rover_bringup.motor_controller:main",
             "imu_node = rover_bringup.imu_node:main",
             "camera_node = rover_bringup.camera_node:main",
             "oak_camera_node = rover_bringup.oak_camera_node:main",
@@ -31,7 +31,8 @@ setup(
             "lidar_filter = rover_bringup.lidar_filter:main",
             "odometry_node = rover_bringup.odometry_node:main",
             "battery_monitor = rover_bringup.battery_monitor:main",
-            "ice_agent_node = rover_bringup.ice_agent_node:main",
+            "police_mode_node = rover_bringup.police_mode_node:main",
+            "wanderer = rover_bringup.wanderer:main",
         ],
     },
 )
